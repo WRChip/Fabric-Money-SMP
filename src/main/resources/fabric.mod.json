@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 1,
+  "id": "moneysmp",
+  "version": "${version}",
+  "name": "MoneySMP",
+  "description": "Economy & Teams System",
+  "authors": ["Flame"],
+  "license": "All-Rights-Reserved",
+  "environment": "*",
+  "entrypoints": {
+    "main": ["dev.flame.moneysmp.MoneySMP"]
+  },
+  "depends": {
+    "fabricloader": ">=0.19.3",
+    "fabric-api": "*",
+    "minecraft": "~1.21.11",
+    "java": ">=21"
+  }
+}

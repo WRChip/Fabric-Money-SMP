@@ -1,0 +1,54 @@
+plugins {
+    id 'fabric-loom' version '1.17.20'
+}
+
+version = '1.1.1'
+group = 'dev.flame'
+base.archivesName = 'MoneySMP-fabric'
+
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    minecraft 'com.mojang:minecraft:1.21.11'
+    mappings loom.officialMojangMappings()
+    modImplementation 'net.fabricmc:fabric-loader:0.19.3'
+    modImplementation 'net.fabricmc.fabric-api:fabric-api:0.141.6+1.21.11'
+    // its pom drags in whatever fabric-api it was built against; we already pin one
+    modImplementation(include('me.lucko:fabric-permissions-api:0.6.1')) {
+        exclude group: 'net.fabricmc.fabric-api'
+    }
+}
+
+java {
+    sourceCompatibility = JavaVersion.VERSION_21
+    targetCompatibility = JavaVersion.VERSION_21
+}
+
+tasks.withType(JavaCompile).configureEach {
+    options.release = 21
+    options.encoding = 'UTF-8'
+}
+
+processResources {
+    inputs.property 'version', version
+    filesMatching('fabric.mod.json') {
+        expand 'version': version
+    }
+}
+
+sourceSets {
+    performance {
+        compileClasspath += sourceSets.main.output + sourceSets.main.compileClasspath
+        runtimeClasspath += sourceSets.main.output + sourceSets.main.runtimeClasspath
+    }
+}
+
+tasks.register('performanceCheck', JavaExec) {
+    dependsOn performanceClasses
+    classpath = sourceSets.performance.runtimeClasspath
+    mainClass = 'dev.flame.moneysmp.PerformanceCheck'
+}
+
+check.dependsOn performanceCheck
