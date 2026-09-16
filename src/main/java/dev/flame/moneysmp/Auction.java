@@ -3,8 +3,12 @@ package dev.flame.moneysmp;
 import net.minecraft.server.level.ServerPlayer;
 
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
 
@@ -21,6 +25,10 @@ final class Auction {
     UUID bidder;
     private int secondsLeft;
     private int pause;
+    // unsold players wait here until the rest of their tier is done, then all
+    // get placed on whichever teams still lack that tier, at random
+    private final Set<UUID> noBidPool = new LinkedHashSet<>();
+    private String noBidTier;
 
     Auction(MoneySMP plugin) {
         this.plugin = plugin;
@@ -90,35 +98,130 @@ final class Auction {
         return sum;
     }
 
+    // null when /moneysmp post-auction can run, otherwise the reason it can't. every active
+    // team with members needs a leader still on it, and every tiered player needs a team,
+    // spread evenly across teams — the same shape a real auction would leave things in
+    String postAuctionCheck() {
+        if (running) return "&cAn auction is already running.";
+        List<String> active = Teams.active(data().teamCount, data().disabledTeams);
+        if (active.isEmpty()) return "&cNo teams are enabled.";
+
+        int tieredSize = -1;
+        for (String t : active) {
+            int members = 0;
+            int tiered = 0;
+            for (Data.PlayerData pd : data().players.values()) {
+                if (!t.equals(pd.team)) continue;
+                members++;
+                if (pd.tier != null) tiered++;
+            }
+            UUID leader = data().teamLeaders.get(t);
+            if (members > 0 && (leader == null || !t.equals(data().team(leader)))) {
+                return "&cTeam " + Teams.color(t) + t + " &chas no leader. Use &f/moneysmp team leader <player>&c.";
+            }
+            if (tieredSize == -1) tieredSize = tiered;
+            else if (tiered != tieredSize) {
+                return "&cTeams don't have an equal number of tiered players &8(" + Teams.color(t) + t + "&8: " + tiered + ", expected " + tieredSize + ")&c.";
+            }
+        }
+        if (tieredSize <= 0) return "&cNo tiered players are on teams yet.";
+        for (Data.PlayerData pd : data().players.values()) {
+            if (pd.tier != null && pd.team == null) return "&cSome tiered players still have no team. Assign them first.";
+        }
+        return null;
+    }
+
+    // skips the bidding entirely and jumps straight to the state an auction leaves behind:
+    // only leaders keep money, then it's split evenly across each team
+    void postAuction() {
+        broadcast("");
+        broadcast(Fmt.PREFIX + " &6&lPost-auction balance reset &7— consolidating and splitting team funds.");
+        zeroNonLeaders();
+        distributeFunds();
+        broadcast(Fmt.PREFIX + " &aDone. Everyone can earn and spend normally again.");
+        broadcast("");
+    }
+
     void start() {
         running = true;
+        zeroNonLeaders();
         broadcast("");
         broadcast(Fmt.PREFIX + " &6&l⚒  THE AUCTION HAS BEGUN  ⚒");
-        broadcast("  &7Bid with &f/bid <amount>&7. Only players on a team can bid, and a team holds one player per tier.");
+        broadcast("  &7Only each team's leader can bid, with &f/bid <amount>&7. A team holds one player per tier.");
         broadcast("");
         next();
+    }
+
+    // everyone tiered or teamed loses their balance except their team's leader, so bidding
+    // draws on one pooled amount per team instead of whoever personally has the most money
+    private void zeroNonLeaders() {
+        for (Map.Entry<UUID, Data.PlayerData> e : data().players.entrySet()) {
+            Data.PlayerData pd = e.getValue();
+            if (pd.tier == null && pd.team == null) continue;
+            if (data().isLeader(e.getKey(), pd.team)) continue;
+            if (pd.money == 0) continue;
+            double old = pd.money;
+            pd.money = 0;
+            data().log("AUCTION_RESET", "SYSTEM", pd.name, old, "Zeroed for auction: not a team leader");
+        }
     }
 
     void stop() {
         running = false;
         player = null;
         bidder = null;
+        noBidPool.clear();
+        noBidTier = null;
+        distributeFunds();
         broadcast(Fmt.PREFIX + " &cThe auction was stopped.");
+    }
+
+    // once the auction's over, whatever each leader is holding is split evenly across
+    // their whole team so everyone can go back to earning and spending normally
+    private void distributeFunds() {
+        for (String team : Teams.active(data().teamCount, data().disabledTeams)) {
+            List<Map.Entry<UUID, Data.PlayerData>> members = new ArrayList<>();
+            for (Map.Entry<UUID, Data.PlayerData> e : data().players.entrySet()) {
+                if (team.equals(e.getValue().team)) members.add(e);
+            }
+            if (members.isEmpty()) continue;
+            double total = 0;
+            for (var e : members) total += e.getValue().money;
+            double share = total / members.size();
+            for (var e : members) {
+                Data.PlayerData pd = e.getValue();
+                double diff = share - pd.money;
+                if (diff != 0) data().log("AUCTION_SPLIT", "SYSTEM", pd.name, diff, "Equal split of team funds after auction");
+                pd.money = share;
+                if (plugin.server.getPlayerList().getPlayer(e.getKey()) != null) {
+                    plugin.notify(e.getKey(), "&a&l$ &e" + Fmt.money(share) + "  &7Your team's funds were split evenly", 8);
+                }
+            }
+        }
     }
 
     private void next() {
         List<UUID> pool = new ArrayList<>();
-        tier = null;
+        String newTier = null;
         for (int i = Tiers.NAMES.size() - 1; i >= 0 && pool.isEmpty(); i--) {
+            String t = Tiers.NAMES.get(i);
             for (Map.Entry<UUID, Data.PlayerData> e : data().players.entrySet()) {
                 Data.PlayerData pd = e.getValue();
-                if (pd.team == null && Tiers.NAMES.get(i).equals(pd.tier)) pool.add(e.getKey());
+                if (pd.team == null && t.equals(pd.tier) && !noBidPool.contains(e.getKey())) pool.add(e.getKey());
             }
-            if (!pool.isEmpty()) tier = Tiers.NAMES.get(i);
+            if (!pool.isEmpty()) newTier = t;
         }
+        // the tier we were just working stops showing up above once every player is either
+        // sold or in the pool; that's the signal to place the pool before moving on
+        if (!noBidPool.isEmpty() && !Objects.equals(noBidTier, newTier)) {
+            flushNoBid();
+            if (!running) return;
+        }
+        tier = newTier;
         if (pool.isEmpty()) {
             running = false;
             player = null;
+            distributeFunds();
             broadcast("");
             broadcast(Fmt.PREFIX + " &a&lAuction complete! &7Every tiered player has a team. See &f/moneysmp teams&7.");
             broadcast("");
@@ -143,6 +246,10 @@ final class Auction {
         Data.PlayerData me = data().get(p);
         if (me.team == null) {
             p.sendSystemMessage(Fmt.p("&cYou need to be on a team to bid."));
+            return;
+        }
+        if (!data().isLeader(p.getUUID(), me.team)) {
+            p.sendSystemMessage(Fmt.p("&cOnly your team's leader can bid."));
             return;
         }
         Data.PlayerData held = data().teamMember(me.team, tier);
@@ -194,49 +301,84 @@ final class Auction {
         Data.PlayerData sold = data().get(player);
         String name = sold.name;
         if (bidder == null) {
-            List<String> open = new ArrayList<>();
-            for (String t : Teams.active(data().teamCount, data().disabledTeams)) if (data().teamMember(t, tier) == null) open.add(t);
-            if (open.isEmpty()) {
-                running = false;
-                player = null;
-                broadcast(Fmt.PREFIX + " &cNo team has room for a tier " + tier + " player. Auction stopped; fix teams and run &f/moneysmp auction &cagain.");
-                return;
-            }
-            sold.team = open.get(ThreadLocalRandom.current().nextInt(open.size()));
-            // the team still pays the minimum, richest member first
-            List<Map.Entry<UUID, Data.PlayerData>> members = new ArrayList<>();
-            for (Map.Entry<UUID, Data.PlayerData> e : data().players.entrySet()) if (sold.team.equals(e.getValue().team)) members.add(e);
-            members.sort((a, b) -> Double.compare(b.getValue().money, a.getValue().money));
-            double left = bid;
-            for (int i = 0; i < members.size() && left > 0; i++) {
-                Data.PlayerData m = members.get(i).getValue();
-                double part = i == members.size() - 1 ? left : Math.min(left, Math.max(0, m.money));
-                if (part <= 0) continue;
-                m.money -= part;
-                left -= part;
-                data().log("BID", m.name, name, part, "Auction minimum, no bids (tier " + tier + ")");
-                if (plugin.server.getPlayerList().getPlayer(members.get(i).getKey()) != null) {
-                    plugin.notify(members.get(i).getKey(), "&c&l- $" + Fmt.money(part) + "  &7" + name + " joined at minimum  &8|  &a$ &e" + Fmt.money(m.money), 6);
-                }
-            }
-            broadcast(Fmt.PREFIX + " &7No bids for &f" + name + "&7. Placed on team " + Teams.color(sold.team) + "&l" + sold.team + " &7for the minimum &e$" + Fmt.money(bid) + "&7.");
+            noBidPool.add(player);
+            noBidTier = tier;
+            broadcast(Fmt.PREFIX + " &7No bids for &f" + name + "&7. Held for random placement once tier " + Tiers.color(tier) + tier + " &7finishes.");
         } else {
             Data.PlayerData winner = data().get(bidder);
             winner.money -= bid;
-            sold.team = winner.team;
+            data().assignTeam(player, winner.team);
             data().log("BID", winner.name, name, bid, "Auction win (tier " + tier + ")");
             broadcast(Fmt.PREFIX + " &a&lSOLD! &f" + name + " &7joins team " + Teams.color(sold.team) + "&l" + sold.team + " &7for &e$" + Fmt.money(bid) + " &8(" + winner.name + ")");
             if (plugin.server.getPlayerList().getPlayer(bidder) != null) {
                 plugin.notify(bidder, "&c&l- $" + Fmt.money(bid) + "  &7Won " + name + "  &8|  &a$ &e" + Fmt.money(winner.money), 6);
             }
-        }
-        ServerPlayer p = plugin.server.getPlayerList().getPlayer(player);
-        if (p != null) {
-            plugin.sync(p);
-            p.sendSystemMessage(Fmt.p("&7You are now on team " + Teams.color(sold.team) + "&l" + sold.team));
+            ServerPlayer p = plugin.server.getPlayerList().getPlayer(player);
+            if (p != null) {
+                plugin.sync(p);
+                p.sendSystemMessage(Fmt.p("&7You are now on team " + Teams.color(sold.team) + "&l" + sold.team));
+            }
         }
         player = null;
         bidder = null;
         pause = PAUSE;
+    }
+
+    // once every player of a tier has been sold or gone unsold, the unsold ones are handed
+    // out at random across whichever teams still lack that tier, each paying the minimum
+    private void flushNoBid() {
+        List<UUID> uids = new ArrayList<>(noBidPool);
+        String t = noBidTier;
+        noBidPool.clear();
+        noBidTier = null;
+
+        List<String> open = new ArrayList<>();
+        for (String team : Teams.active(data().teamCount, data().disabledTeams)) if (data().teamMember(team, t) == null) open.add(team);
+        if (open.size() < uids.size()) {
+            running = false;
+            player = null;
+            distributeFunds();
+            broadcast(Fmt.PREFIX + " &cOnly &f" + open.size() + " &copen team(s) for &f" + uids.size() + " &cunsold tier " + Tiers.color(t) + t + " &cplayer(s). Auction stopped; fix teams and run &f/moneysmp auction &cagain.");
+            return;
+        }
+        Collections.shuffle(uids);
+        Collections.shuffle(open);
+        double price = plugin.config.minimum(t);
+        broadcast("");
+        broadcast(Fmt.PREFIX + " &6&lTier " + Tiers.color(t) + t + "&6&l complete &7— placing &f" + uids.size() + " &7unsold player(s) at random for &e$" + Fmt.money(price) + " &7each.");
+        for (int i = 0; i < uids.size(); i++) {
+            UUID uid = uids.get(i);
+            Data.PlayerData pd = data().get(uid);
+            data().assignTeam(uid, open.get(i));
+            chargeTeam(pd.team, price, uid, pd.name, t);
+            broadcast("  " + Teams.color(pd.team) + "&l" + pd.name + "  &8»  " + Teams.color(pd.team) + pd.team);
+            ServerPlayer p = plugin.server.getPlayerList().getPlayer(uid);
+            if (p != null) {
+                plugin.sync(p);
+                p.sendSystemMessage(Fmt.p("&7You are now on team " + Teams.color(pd.team) + "&l" + pd.team));
+            }
+        }
+        broadcast("");
+    }
+
+    // splits `price` off the team's existing members, richest first, to cover a free placement
+    private void chargeTeam(String team, double price, UUID exclude, String soldName, String tier) {
+        List<Map.Entry<UUID, Data.PlayerData>> members = new ArrayList<>();
+        for (Map.Entry<UUID, Data.PlayerData> e : data().players.entrySet()) {
+            if (team.equals(e.getValue().team) && !e.getKey().equals(exclude)) members.add(e);
+        }
+        members.sort((a, b) -> Double.compare(b.getValue().money, a.getValue().money));
+        double left = price;
+        for (int i = 0; i < members.size() && left > 0; i++) {
+            Data.PlayerData m = members.get(i).getValue();
+            double part = i == members.size() - 1 ? left : Math.min(left, Math.max(0, m.money));
+            if (part <= 0) continue;
+            m.money -= part;
+            left -= part;
+            data().log("BID", m.name, soldName, part, "Auction minimum, no bids (tier " + tier + ")");
+            if (plugin.server.getPlayerList().getPlayer(members.get(i).getKey()) != null) {
+                plugin.notify(members.get(i).getKey(), "&c&l- $" + Fmt.money(part) + "  &7" + soldName + " joined at minimum  &8|  &a$ &e" + Fmt.money(m.money), 6);
+            }
+        }
     }
 }

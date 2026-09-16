@@ -30,7 +30,7 @@ import static com.mojang.brigadier.arguments.StringArgumentType.word;
 final class Commands {
     private static final String LINE = "&8&m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━";
     private static final List<String> ADMIN_SUBS = List.of("give", "take", "set", "reset", "fine", "transaction",
-        "teambal", "teammax", "teamcount", "team", "randomteams", "tier", "auction");
+        "teambal", "teammax", "teamcount", "team", "randomteams", "tier", "auction", "post-auction");
 
     private final MoneySMP plugin;
 
@@ -78,6 +78,7 @@ final class Commands {
                 .then(argument("tier", word()).suggests(tiers).executes(c.exec("randomteams", "tier"))))
             .then(literal("auction").requires(admin).executes(c.exec("auction"))
                 .then(literal("stop").executes(c.exec("auction stop"))))
+            .then(literal("post-auction").requires(admin).executes(c.exec("post-auction")))
             .then(literal("tier").requires(admin).executes(c.exec("tier"))
                 .then(literal("set").executes(c.exec("tier set"))
                     .then(argument("player", word()).suggests(players).executes(c.exec("tier set", "player"))
@@ -102,7 +103,9 @@ final class Commands {
                 .then(literal("enable").executes(c.exec("team enable"))
                     .then(argument("team", word()).suggests(allTeams).executes(c.exec("team enable", "team"))))
                 .then(literal("disable").executes(c.exec("team disable"))
-                    .then(argument("team", word()).suggests(allTeams).executes(c.exec("team disable", "team")))));
+                    .then(argument("team", word()).suggests(allTeams).executes(c.exec("team disable", "team"))))
+                .then(literal("leader").executes(c.exec("team leader"))
+                    .then(argument("player", word()).suggests(players).executes(c.exec("team leader", "player")))));
 
         for (String sub : new String[]{"give", "take", "set"}) {
             root.then(literal(sub).requires(admin).executes(c.exec(sub))
@@ -287,6 +290,7 @@ final class Commands {
                     }
                     case "tier" -> tier(s, args);
                     case "auction" -> auction(s, args);
+                    case "post-auction" -> postAuction(s);
                     default -> send(s, Fmt.PREFIX + " &cUnknown subcommand. Run &f/moneysmp &7for help.");
                 }
             }
@@ -320,9 +324,11 @@ final class Commands {
             send(s, "  &f/moneysmp team set &e<player> <team>");
             send(s, "  &f/moneysmp team enable &e<team>");
             send(s, "  &f/moneysmp team disable &e<team>");
+            send(s, "  &f/moneysmp team leader &e<player>");
             send(s, "  &f/moneysmp tier set &e<player> <S-F>");
             send(s, "  &f/moneysmp tier clear &e<player>");
             send(s, "  &f/moneysmp auction &8[stop]");
+            send(s, "  &f/moneysmp post-auction");
             send(s, "  &f/moneysmp transaction &e<time> [page]  &8(e.g. 1h 30m 7d)");
             send(s, "");
             send(s, "  &7&lTeams &8(count: " + data().teamCount + "):");
@@ -344,7 +350,9 @@ final class Commands {
             send(s, Fmt.PREFIX + " &7You are not on a team.");
             return;
         }
-        send(s, Fmt.PREFIX + " &7Your team: " + Teams.color(t) + "&l" + t);
+        boolean leader = data().isLeader(p.getUUID(), t);
+        send(s, Fmt.PREFIX + " &7Your team: " + Teams.color(t) + "&l" + t
+            + (leader ? " &6(you're the leader — only you can bid)" : ""));
     }
 
     private void teams(CommandSourceStack s) {
@@ -359,7 +367,8 @@ final class Commands {
                 if (!t.equals(data().team(p.getUUID()))) continue;
                 count++;
                 if (members.length() > 0) members.append("&7, ");
-                members.append(col).append(p.getScoreboardName());
+                boolean leader = data().isLeader(p.getUUID(), t);
+                members.append(col).append(p.getScoreboardName()).append(leader ? "&6★" : "");
             }
             if (count > 0) {
                 send(s, "  " + col + "&l" + t + " &8(" + count + ")  &8»  " + members);
@@ -431,6 +440,7 @@ final class Commands {
             pd.team = null;
             count++;
         }
+        data().teamLeaders.clear();
         for (ServerPlayer p : onlinePlayers()) plugin.sync(p);
         data().log("RESET", s.getTextName(), "ALL PLAYERS", 100, "Mass balance and teams reset");
         send(s, "");
@@ -528,7 +538,7 @@ final class Commands {
                 case "GIVE" -> "&b";
                 case "TAKE" -> "&4";
                 case "SET" -> "&5";
-                case "RESET" -> "&8";
+                case "RESET", "AUCTION_RESET", "AUCTION_SPLIT" -> "&8";
                 default -> "&7";
             };
             send(s, "  " + col + "&l[" + tx.type() + "]  &8" + Fmt.timeAgo(ago) + " ago  &8|  &e$" + Fmt.money(tx.amount()));
@@ -563,7 +573,8 @@ final class Commands {
                 total += pd.money;
                 count++;
                 String tag = online(e.getKey()) != null ? "&a(online)" : "&8(offline)";
-                send(s, "    " + col + pd.name + " " + tag + "  &8»  &e$" + Fmt.money(pd.money));
+                String leadTag = data().isLeader(e.getKey(), t) ? " &6★leader" : "";
+                send(s, "    " + col + pd.name + " " + tag + leadTag + "  &8»  &e$" + Fmt.money(pd.money));
             }
             if (count == 0) {
                 send(s, "    &8No players assigned.");
@@ -630,7 +641,34 @@ final class Commands {
             case "set" -> teamSet(s, args);
             case "enable" -> teamToggle(s, args, true);
             case "disable" -> teamToggle(s, args, false);
-            default -> send(s, Fmt.PREFIX + " &cUsage: &f/moneysmp team <set|enable|disable> ...");
+            case "leader" -> teamLeader(s, args);
+            default -> send(s, Fmt.PREFIX + " &cUsage: &f/moneysmp team <set|enable|disable|leader> ...");
+        }
+    }
+
+    // manual override for who bids on a team's behalf, in case the automatic
+    // first-assigned pick isn't who you want
+    private void teamLeader(CommandSourceStack s, String[] args) {
+        if (args.length < 3) {
+            send(s, Fmt.PREFIX + " &cUsage: &f/moneysmp team leader <player>");
+            return;
+        }
+        String name = args[2];
+        UUID uid = data().resolve(name);
+        if (uid == null) {
+            send(s, Fmt.PREFIX + " &cPlayer &f" + name + " &cnot found.");
+            return;
+        }
+        Data.PlayerData pd = data().get(uid);
+        if (pd.team == null) {
+            send(s, Fmt.PREFIX + " &f" + pd.name + " &cisn't on a team.");
+            return;
+        }
+        data().teamLeaders.put(pd.team, uid);
+        send(s, Fmt.PREFIX + " &aSet &f" + pd.name + " &aas the leader of team " + Teams.color(pd.team) + "&l" + pd.team + "&a.");
+        ServerPlayer target = online(uid);
+        if (target != null) {
+            send(target, Fmt.PREFIX + " &7You are now the leader of team " + Teams.color(pd.team) + "&l" + pd.team + "&7. You're the only one who can bid for it.");
         }
     }
 
@@ -660,6 +698,7 @@ final class Commands {
         for (Map.Entry<UUID, Data.PlayerData> e : data().players.entrySet()) {
             if (team.equals(e.getValue().team)) cleared.add(e.getKey());
         }
+        data().clearLeader(team);
         for (UUID uid : cleared) {
             data().get(uid).team = null;
             ServerPlayer p = online(uid);
@@ -703,7 +742,7 @@ final class Commands {
                 return;
             }
         }
-        pd.team = newTeam;
+        data().assignTeam(uid, newTeam);
         ServerPlayer target = online(uid);
         if (target != null) {
             plugin.sync(target);
@@ -733,6 +772,7 @@ final class Commands {
         for (Data.PlayerData pd : data().players.values()) {
             if (active.contains(pd.team)) pd.team = null;
         }
+        for (String t : active) data().clearLeader(t);
 
         int[] counts = new int[active.size()];
         Collections.shuffle(pool);
@@ -741,7 +781,7 @@ final class Commands {
             for (int i = 0; i < active.size(); i++) if (counts[i] < max) open.add(i);
             int ti = open.get(ThreadLocalRandom.current().nextInt(open.size()));
             counts[ti]++;
-            data().get(uid).team = active.get(ti);
+            data().assignTeam(uid, active.get(ti));
         }
 
         broadcast("");
@@ -792,7 +832,7 @@ final class Commands {
         }
         Collections.shuffle(pool);
         Collections.shuffle(active);
-        for (int i = 0; i < pool.size(); i++) data().get(pool.get(i)).team = active.get(i);
+        for (int i = 0; i < pool.size(); i++) data().assignTeam(pool.get(i), active.get(i));
 
         broadcast("");
         broadcast(Fmt.PREFIX + " &a&l⚔  TIER " + Tiers.color(tier) + tier + " &a&lTEAMS ASSIGNED  ⚔");
@@ -883,6 +923,17 @@ final class Commands {
             return;
         }
         plugin.auction.start();
+    }
+
+    // skips a live bidding auction and jumps straight to its end state: only leaders keep
+    // money, then teams split evenly. requires teams already set up as an auction would leave them
+    private void postAuction(CommandSourceStack s) {
+        String why = plugin.auction.postAuctionCheck();
+        if (why != null) {
+            send(s, Fmt.PREFIX + " " + why);
+            return;
+        }
+        plugin.auction.postAuction();
     }
 
     private int bid(CommandSourceStack s, double amt) {

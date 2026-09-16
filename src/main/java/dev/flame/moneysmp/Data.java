@@ -47,6 +47,9 @@ final class Data {
     boolean teamCountSet;
     Integer teamMax;
     final Set<String> disabledTeams = new HashSet<>();
+    // one designated bidder per team: whoever was assigned to it first. only they can bid,
+    // and everyone else on a team or tier gets zeroed out when the auction starts
+    final Map<String, UUID> teamLeaders = new HashMap<>();
 
     private final Path file;
     private final MinecraftServer server;
@@ -54,7 +57,7 @@ final class Data {
     private CompletableFuture<Void> pending = CompletableFuture.completedFuture(null);
 
     private record Snapshot(int teamCount, boolean teamCountSet, Integer teamMax, Set<String> disabledTeams,
-                             Map<UUID, PlayerData> players, List<Tx> transactions) {}
+                             Map<String, UUID> teamLeaders, Map<UUID, PlayerData> players, List<Tx> transactions) {}
 
     Data(Path dir, MinecraftServer server) {
         this.file = dir.resolve("data.json");
@@ -66,6 +69,7 @@ final class Data {
         byName.clear();
         transactions.clear();
         disabledTeams.clear();
+        teamLeaders.clear();
         if (!Files.exists(file)) return;
         JsonObject y;
         try {
@@ -79,6 +83,11 @@ final class Data {
         teamMax = y.has("teammax") && !y.get("teammax").isJsonNull() ? y.get("teammax").getAsInt() : null;
         if (y.has("disabledteams")) {
             for (JsonElement el : y.getAsJsonArray("disabledteams")) disabledTeams.add(el.getAsString());
+        }
+        if (y.has("teamleaders")) {
+            for (Map.Entry<String, JsonElement> e : y.getAsJsonObject("teamleaders").entrySet()) {
+                teamLeaders.put(e.getKey(), UUID.fromString(e.getValue().getAsString()));
+            }
         }
         if (y.has("players")) {
             for (Map.Entry<String, JsonElement> e : y.getAsJsonObject("players").entrySet()) {
@@ -106,6 +115,25 @@ final class Data {
             }
         }
         transactions.sort(Comparator.comparingLong(Tx::stamp));
+        bootstrapLeaders();
+    }
+
+    // saves predate the leader system: give any team that has members but no recorded
+    // leader one, so bidding isn't locked out on an existing world. picked by name so
+    // it's at least deterministic, since join order was never recorded
+    private void bootstrapLeaders() {
+        Map<String, String> bestName = new HashMap<>();
+        Map<String, UUID> bestUid = new HashMap<>();
+        for (Map.Entry<UUID, PlayerData> e : players.entrySet()) {
+            PlayerData pd = e.getValue();
+            if (pd.team == null || teamLeaders.containsKey(pd.team)) continue;
+            String name = pd.name == null ? "" : pd.name;
+            if (!bestName.containsKey(pd.team) || name.compareTo(bestName.get(pd.team)) < 0) {
+                bestName.put(pd.team, name);
+                bestUid.put(pd.team, e.getKey());
+            }
+        }
+        teamLeaders.putAll(bestUid);
     }
 
     void save() {
@@ -131,7 +159,8 @@ final class Data {
             saved.tier = pd.tier;
             copy.put(uid, saved);
         });
-        return new Snapshot(teamCount, teamCountSet, teamMax, Set.copyOf(disabledTeams), copy, List.copyOf(transactions));
+        return new Snapshot(teamCount, teamCountSet, teamMax, Set.copyOf(disabledTeams), Map.copyOf(teamLeaders),
+            copy, List.copyOf(transactions));
     }
 
     private void write(Snapshot snapshot) {
@@ -148,6 +177,9 @@ final class Data {
                 out.name("disabledteams").beginArray();
                 for (String t : snapshot.disabledTeams()) out.value(t);
                 out.endArray();
+                out.name("teamleaders").beginObject();
+                for (Map.Entry<String, UUID> e : snapshot.teamLeaders().entrySet()) out.name(e.getKey()).value(e.getValue().toString());
+                out.endObject();
                 out.name("players").beginObject();
                 for (Map.Entry<UUID, PlayerData> e : snapshot.players().entrySet()) {
                     out.name(e.getKey().toString());
@@ -203,6 +235,22 @@ final class Data {
         return null;
     }
 
+    // puts a player on a team and, if that team has no leader yet, makes them it
+    void assignTeam(UUID uid, String team) {
+        get(uid).team = team;
+        if (team != null) teamLeaders.putIfAbsent(team, uid);
+    }
+
+    // call before reshuffling a team's whole membership so the next assignTeam() on it
+    // picks a fresh leader instead of keeping one who might not even be on it anymore
+    void clearLeader(String team) {
+        teamLeaders.remove(team);
+    }
+
+    boolean isLeader(UUID uid, String team) {
+        return team != null && uid.equals(teamLeaders.get(team));
+    }
+
     // stored name -> uuid, falling back to an online player with that exact name
     UUID lookup(String name) {
         UUID uid = byName.get(name);
@@ -224,7 +272,7 @@ final class Data {
             : Optional.of(NameAndId.createOffline(name));
         if (found.isEmpty()) return null;
         uid = found.get().id();
-        if (!players.containsKey(uid)) get(uid).money = 100;
+        if (!players.containsKey(uid)) get(uid).money = 0;
         PlayerData pd = get(uid);
         pd.name = found.get().name();
         byName.put(pd.name, uid);

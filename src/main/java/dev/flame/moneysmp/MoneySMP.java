@@ -90,9 +90,7 @@ public final class MoneySMP implements ModInitializer {
     }
 
     private void onJoin(ServerPlayer p) {
-        boolean fresh = !data.players.containsKey(p.getUUID());
-        Data.PlayerData pd = data.get(p);
-        if (fresh) pd.money = 100;
+        data.get(p);
         sync(p);
     }
 
