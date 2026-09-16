@@ -31,6 +31,9 @@ final class Commands {
     private static final String LINE = "&8&m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━";
     private static final List<String> ADMIN_SUBS = List.of("give", "take", "set", "reset", "fine", "transaction",
         "teambal", "teammax", "teamcount", "team", "randomteams", "tier", "auction", "post-auction");
+    // reshaping teams or tiers under a live auction would leave it selling players that
+    // moved or bidding for teams whose leader changed
+    private static final Set<String> LOCKED_DURING_AUCTION = Set.of("reset", "randomteams", "tier", "team", "post-auction");
 
     private final MoneySMP plugin;
 
@@ -176,7 +179,8 @@ final class Commands {
 
     private static Double num(String s) {
         try {
-            return Double.parseDouble(s);
+            double v = Double.parseDouble(s);
+            return Double.isFinite(v) ? v : null;
         } catch (NumberFormatException e) {
             return null;
         }
@@ -194,18 +198,20 @@ final class Commands {
             send(s, Fmt.PREFIX + " &cAmount must be above 0.");
             return 0;
         }
-        if (name.equals(p.getScoreboardName())) {
+        UUID target = data().lookup(name);
+        if (target == null) {
+            send(s, Fmt.PREFIX + " &cPlayer &f" + name + " &cnot found.");
+            return 0;
+        }
+        if (target.equals(p.getUUID())) {
             send(s, Fmt.PREFIX + " &cYou cannot pay yourself.");
             return 0;
         }
         Data.PlayerData me = data().get(p);
-        if (me.money < amt) {
-            send(s, Fmt.PREFIX + " &cInsufficient funds! &7You have &e$" + Fmt.money(me.money) + "&7.");
-            return 0;
-        }
-        UUID target = data().lookup(name);
-        if (target == null) {
-            send(s, Fmt.PREFIX + " &cPlayer &f" + name + " &cnot found.");
+        double locked = plugin.auction.committed(p.getUUID());
+        if (me.money - locked < amt) {
+            send(s, Fmt.PREFIX + " &cInsufficient funds! &7You have &e$" + Fmt.money(me.money) + "&7."
+                + (locked > 0 ? " &e$" + Fmt.money(locked) + " &7of it is committed to your auction bid." : ""));
             return 0;
         }
         me.money -= amt;
@@ -273,6 +279,10 @@ final class Commands {
                     }
                     return 0;
                 }
+                if (plugin.auction.running && LOCKED_DURING_AUCTION.contains(sub)) {
+                    send(s, Fmt.PREFIX + " &cAn auction is running. Stop it first with &f/moneysmp auction stop&c.");
+                    return 0;
+                }
                 switch (sub) {
                     case "give" -> adjust(s, args, "give");
                     case "take" -> adjust(s, args, "take");
@@ -319,7 +329,7 @@ final class Commands {
             send(s, "  &f/moneysmp fine &e<player> <amount> <reason>");
             send(s, "  &f/moneysmp teambal");
             send(s, "  &f/moneysmp teammax &e<number>");
-            send(s, "  &f/moneysmp teamcount &e<1-9>");
+            send(s, "  &f/moneysmp teamcount &e<1-" + Teams.NAMES.size() + ">");
             send(s, "  &f/moneysmp randomteams &8[tier]");
             send(s, "  &f/moneysmp team set &e<player> <team>");
             send(s, "  &f/moneysmp team enable &e<team>");
@@ -402,7 +412,7 @@ final class Commands {
             send(s, Fmt.PREFIX + (mode.equals("set") ? " &cCannot set negative balance." : " &cAmount must be above 0."));
             return;
         }
-        UUID uid = data().lookup(name);
+        UUID uid = data().resolve(name);
         if (uid == null) {
             send(s, Fmt.PREFIX + " &cPlayer &f" + name + " &cnot found.");
             return;
@@ -465,7 +475,7 @@ final class Commands {
             send(s, Fmt.PREFIX + " &cFine must be above 0.");
             return;
         }
-        UUID uid = data().lookup(name);
+        UUID uid = data().resolve(name);
         if (uid == null) {
             send(s, Fmt.PREFIX + " &cPlayer &f" + name + " &cnot found.");
             return;
@@ -605,7 +615,7 @@ final class Commands {
 
     private void teamcount(CommandSourceStack s, String[] args) {
         if (args.length < 2) {
-            send(s, Fmt.PREFIX + " &cUsage: &f/moneysmp teamcount <1-9>");
+            send(s, Fmt.PREFIX + " &cUsage: &f/moneysmp teamcount <1-" + Teams.NAMES.size() + ">");
             return;
         }
         Double n = num(args[1]);
@@ -634,7 +644,7 @@ final class Commands {
 
     private void team(CommandSourceStack s, String[] args) {
         if (args.length < 2) {
-            send(s, Fmt.PREFIX + " &cUsage: &f/moneysmp team <set|enable|disable> ...");
+            send(s, Fmt.PREFIX + " &cUsage: &f/moneysmp team <set|enable|disable|leader> ...");
             return;
         }
         switch (args[1].toLowerCase()) {

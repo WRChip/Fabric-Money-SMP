@@ -64,10 +64,11 @@ final class Auction {
         }
         if (size == -1) return "&cNo players have a tier yet. Use &f/moneysmp tier set <player> <tier>&c.";
         if (size == -2) return "&cEvery tier in use must have the same number of players (unused tiers are skipped).&r" + summary;
-        if (size > data().teamCount) return "&cEach tier has &f" + size + " &cplayers but there are only &f" + data().teamCount + " &cteams. Raise &f/moneysmp teamcount&c.";
+        List<String> active = Teams.active(data().teamCount, data().disabledTeams);
+        if (size > active.size()) return "&cEach tier has &f" + size + " &cplayers but only &f" + active.size() + " &cteams are enabled. Raise &f/moneysmp teamcount &cor &f/moneysmp team enable&c.";
         if (teamed == 0) return "&cNo team has a player yet. Use &f/moneysmp randomteams <tier> &cfirst.";
         if (!pending) return "&cEveryone with a tier already has a team.";
-        for (String t : Teams.active(data().teamCount, data().disabledTeams)) {
+        for (String t : active) {
             double total = 0;
             int members = 0;
             for (Data.PlayerData pd : data().players.values()) {
@@ -136,7 +137,7 @@ final class Auction {
     void postAuction() {
         broadcast("");
         broadcast(Fmt.PREFIX + " &6&lPost-auction balance reset &7— consolidating and splitting team funds.");
-        zeroNonLeaders();
+        poolFunds();
         distributeFunds();
         broadcast(Fmt.PREFIX + " &aDone. Everyone can earn and spend normally again.");
         broadcast("");
@@ -144,7 +145,7 @@ final class Auction {
 
     void start() {
         running = true;
-        zeroNonLeaders();
+        poolFunds();
         broadcast("");
         broadcast(Fmt.PREFIX + " &6&l⚒  THE AUCTION HAS BEGUN  ⚒");
         broadcast("  &7Only each team's leader can bid, with &f/bid <amount>&7. A team holds one player per tier.");
@@ -152,9 +153,10 @@ final class Auction {
         next();
     }
 
-    // everyone tiered or teamed loses their balance except their team's leader, so bidding
-    // draws on one pooled amount per team instead of whoever personally has the most money
-    private void zeroNonLeaders() {
+    // everyone tiered or teamed hands their balance to their team's leader, so bidding
+    // draws on one pooled amount per team instead of whoever personally has the most money.
+    // tiered players still without a team have nowhere to pool into and are zeroed
+    private void poolFunds() {
         for (Map.Entry<UUID, Data.PlayerData> e : data().players.entrySet()) {
             Data.PlayerData pd = e.getValue();
             if (pd.tier == null && pd.team == null) continue;
@@ -162,8 +164,19 @@ final class Auction {
             if (pd.money == 0) continue;
             double old = pd.money;
             pd.money = 0;
-            data().log("AUCTION_RESET", "SYSTEM", pd.name, old, "Zeroed for auction: not a team leader");
+            Data.PlayerData leader = pd.team == null ? null : data().players.get(data().teamLeaders.get(pd.team));
+            if (leader == null) {
+                data().log("AUCTION_RESET", "SYSTEM", pd.name, old, "Zeroed for auction: no team to pool into");
+                continue;
+            }
+            leader.money += old;
+            data().log("AUCTION_RESET", pd.name, leader.name, old, "Pooled to team leader for auction");
         }
+    }
+
+    // money the top bidder can't spend elsewhere until the current lot closes
+    double committed(UUID uid) {
+        return running && uid.equals(bidder) ? bid : 0;
     }
 
     void stop() {

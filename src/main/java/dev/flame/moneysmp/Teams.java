@@ -69,7 +69,7 @@ final class Teams {
     static void leave(MinecraftServer server, ServerPlayer p) {
         ServerScoreboard sb = server.getScoreboard();
         PlayerTeam t = sb.getPlayersTeam(p.getScoreboardName());
-        if (t != null) sb.removePlayerFromTeam(p.getScoreboardName(), t);
+        if (t != null && t.getName().startsWith("msmp_")) sb.removePlayerFromTeam(p.getScoreboardName(), t);
     }
 
     static void sync(MinecraftServer server, ServerPlayer p, String tier, String team) {

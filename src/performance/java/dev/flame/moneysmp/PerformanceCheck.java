@@ -87,8 +87,45 @@ public final class PerformanceCheck {
             require(loaded.teamMax == 12 && loaded.teamCount == Teams.NAMES.size(), "settings round trip");
             require(loaded.transactions.size() == 100_001, "history round trip");
             require(!Files.exists(dir.resolve("data.json.tmp")), "temporary save must be replaced");
+            require(uid.equals(loaded.teamLeaders.get("Red")), "lone member becomes leader on load");
+
+            UUID other = UUID.randomUUID();
+            loaded.get(other).name = "zed";
+            loaded.assignTeam(other, "Red");
+            require(uid.equals(loaded.teamLeaders.get("Red")), "existing leader kept");
+            loaded.assignTeam(uid, "Blue");
+            require(other.equals(loaded.teamLeaders.get("Red")), "leader handed over when leader moves");
+            require(uid.equals(loaded.teamLeaders.get("Blue")), "mover leads the empty team joined");
         } finally {
             loaded.close();
+        }
+
+        Path broken = Files.createTempDirectory(Path.of("build"), "data-broken-");
+        Path file = broken.resolve("data.json");
+        Files.writeString(file, "{\"players\": {\"not-a-uuid\": {\"money\": 5}}}");
+        Data bad = new Data(broken, null);
+        bad.load();
+        require(bad.readOnly, "unreadable data.json must mark read-only");
+        require(bad.players.isEmpty(), "failed load leaves no partial state");
+        bad.get(UUID.randomUUID()).money = 1;
+        bad.save();
+        bad.close();
+        require(Files.readString(file).contains("not-a-uuid"), "unreadable data.json must never be overwritten");
+
+        Path odd = Files.createTempDirectory(Path.of("build"), "data-odd-");
+        Files.writeString(odd.resolve("data.json"), "{\"teamcount\": 9, \"teamcount_set\": true, \"disabledteams\": [\"rED\", \"Pink\"],"
+            + " \"players\": {\"" + uid + "\": {\"name\": \"t\", \"money\": 1, \"team\": \"gold\", \"tier\": \"s\"},"
+            + " \"" + UUID.randomUUID() + "\": {\"name\": \"u\", \"money\": 1, \"team\": \"Pink\", \"tier\": \"X\"}}}");
+        Data lenient = new Data(odd, null);
+        try {
+            lenient.load();
+            require(!lenient.readOnly, "unknown names are dropped, not fatal");
+            require(lenient.teamCount == Teams.NAMES.size(), "team count clamped");
+            require(lenient.disabledTeams.equals(java.util.Set.of("Red")), "disabled teams normalised");
+            require("Gold".equals(lenient.team(uid)) && "S".equals(lenient.tier(uid)), "team and tier normalised");
+            require(lenient.players.values().stream().filter(p -> p.team == null && p.tier == null).count() == 1, "unknown team and tier dropped");
+        } finally {
+            lenient.close();
         }
         System.out.println("MoneySMP performance checks passed");
     }

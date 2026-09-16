@@ -55,6 +55,9 @@ final class Data {
     private final MinecraftServer server;
     private final ExecutorService writer = Executors.newSingleThreadExecutor(r -> new Thread(r, "MoneySMP-save"));
     private CompletableFuture<Void> pending = CompletableFuture.completedFuture(null);
+    // set when data.json exists but couldn't be read. saving is then refused so a corrupt
+    // or momentarily locked file isn't replaced by an empty economy on the next autosave
+    boolean readOnly;
 
     private record Snapshot(int teamCount, boolean teamCountSet, Integer teamMax, Set<String> disabledTeams,
                              Map<String, UUID> teamLeaders, Map<UUID, PlayerData> players, List<Tx> transactions) {}
@@ -70,23 +73,39 @@ final class Data {
         transactions.clear();
         disabledTeams.clear();
         teamLeaders.clear();
+        readOnly = false;
         if (!Files.exists(file)) return;
-        JsonObject y;
         try {
-            y = JsonParser.parseString(Files.readString(file)).getAsJsonObject();
+            read(JsonParser.parseString(Files.readString(file)).getAsJsonObject());
         } catch (IOException | RuntimeException e) {
-            MoneySMP.LOG.error("could not read data.json", e);
+            players.clear();
+            byName.clear();
+            transactions.clear();
+            disabledTeams.clear();
+            teamLeaders.clear();
+            readOnly = true;
+            MoneySMP.LOG.error("could not read data.json; saving is disabled so it is not overwritten. fix or move the file and restart", e);
             return;
         }
+        transactions.sort(Comparator.comparingLong(Tx::stamp));
+        fixLeaders();
+    }
+
+    private void read(JsonObject y) {
         teamCountSet = y.has("teamcount_set") && y.get("teamcount_set").getAsBoolean();
         teamCount = teamCountSet && y.has("teamcount") ? y.get("teamcount").getAsInt() : Teams.NAMES.size();
+        teamCount = Math.max(1, Math.min(Teams.NAMES.size(), teamCount));
         teamMax = y.has("teammax") && !y.get("teammax").isJsonNull() ? y.get("teammax").getAsInt() : null;
         if (y.has("disabledteams")) {
-            for (JsonElement el : y.getAsJsonArray("disabledteams")) disabledTeams.add(el.getAsString());
+            for (JsonElement el : y.getAsJsonArray("disabledteams")) {
+                String t = validTeam(el.getAsString(), "disabledteams");
+                if (t != null) disabledTeams.add(t);
+            }
         }
         if (y.has("teamleaders")) {
             for (Map.Entry<String, JsonElement> e : y.getAsJsonObject("teamleaders").entrySet()) {
-                teamLeaders.put(e.getKey(), UUID.fromString(e.getValue().getAsString()));
+                String t = validTeam(e.getKey(), "teamleaders");
+                if (t != null) teamLeaders.put(t, UUID.fromString(e.getValue().getAsString()));
             }
         }
         if (y.has("players")) {
@@ -95,8 +114,12 @@ final class Data {
                 PlayerData pd = new PlayerData();
                 pd.name = o.has("name") && !o.get("name").isJsonNull() ? o.get("name").getAsString() : null;
                 pd.money = o.has("money") ? o.get("money").getAsDouble() : 0;
-                pd.team = o.has("team") && !o.get("team").isJsonNull() ? o.get("team").getAsString() : null;
-                pd.tier = o.has("tier") && !o.get("tier").isJsonNull() ? o.get("tier").getAsString() : null;
+                if (o.has("team") && !o.get("team").isJsonNull()) pd.team = validTeam(o.get("team").getAsString(), "player " + e.getKey());
+                if (o.has("tier") && !o.get("tier").isJsonNull()) {
+                    String raw = o.get("tier").getAsString();
+                    pd.tier = Tiers.normalise(raw);
+                    if (pd.tier == null) MoneySMP.LOG.warn("data.json: dropping unknown tier '{}' on player {}", raw, e.getKey());
+                }
                 UUID uid = UUID.fromString(e.getKey());
                 players.put(uid, pd);
                 if (pd.name != null) byName.put(pd.name, uid);
@@ -114,35 +137,52 @@ final class Data {
                     o.get("note").getAsString()));
             }
         }
-        transactions.sort(Comparator.comparingLong(Tx::stamp));
-        bootstrapLeaders();
     }
 
-    // saves predate the leader system: give any team that has members but no recorded
-    // leader one, so bidding isn't locked out on an existing world. picked by name so
-    // it's at least deterministic, since join order was never recorded
-    private void bootstrapLeaders() {
-        Map<String, String> bestName = new HashMap<>();
-        Map<String, UUID> bestUid = new HashMap<>();
+    private static String validTeam(String raw, String where) {
+        String t = Teams.normalise(raw);
+        if (Teams.NAMES.contains(t)) return t;
+        MoneySMP.LOG.warn("data.json: dropping unknown team '{}' in {}", raw, where);
+        return null;
+    }
+
+    // every team with members gets a leader who is actually on it. covers saves that
+    // predate the leader system and any leader entry left pointing at someone who moved
+    private void fixLeaders() {
+        for (String t : Teams.NAMES) {
+            UUID leader = teamLeaders.get(t);
+            if (leader == null || !t.equals(team(leader))) repickLeader(t);
+        }
+    }
+
+    // lowest name wins so the choice is at least deterministic; join order was never recorded
+    private void repickLeader(String team) {
+        UUID best = null;
+        String bestName = null;
         for (Map.Entry<UUID, PlayerData> e : players.entrySet()) {
             PlayerData pd = e.getValue();
-            if (pd.team == null || teamLeaders.containsKey(pd.team)) continue;
+            if (!team.equals(pd.team)) continue;
             String name = pd.name == null ? "" : pd.name;
-            if (!bestName.containsKey(pd.team) || name.compareTo(bestName.get(pd.team)) < 0) {
-                bestName.put(pd.team, name);
-                bestUid.put(pd.team, e.getKey());
+            if (best == null || name.compareTo(bestName) < 0) {
+                best = e.getKey();
+                bestName = name;
             }
         }
-        teamLeaders.putAll(bestUid);
+        if (best == null) teamLeaders.remove(team);
+        else teamLeaders.put(team, best);
     }
 
     void save() {
-        if (!pending.isDone()) return;
+        if (readOnly || writer.isShutdown() || !pending.isDone()) return;
         Snapshot snapshot = snapshot();
         pending = CompletableFuture.runAsync(() -> write(snapshot), writer);
     }
 
     void close() {
+        if (readOnly) {
+            writer.shutdown();
+            return;
+        }
         Snapshot snapshot = snapshot();
         CompletableFuture<Void> last = CompletableFuture.runAsync(() -> write(snapshot), writer);
         writer.shutdown();
@@ -196,7 +236,7 @@ final class Data {
             } catch (AtomicMoveNotSupportedException e) {
                 Files.move(tmp, file, StandardCopyOption.REPLACE_EXISTING);
             }
-        } catch (IOException e) {
+        } catch (IOException | RuntimeException e) {
             MoneySMP.LOG.error("could not save data.json", e);
         }
     }
@@ -207,8 +247,10 @@ final class Data {
 
     PlayerData get(ServerPlayer p) {
         PlayerData pd = get(p.getUUID());
-        pd.name = p.getScoreboardName();
-        byName.put(pd.name, p.getUUID());
+        String name = p.getScoreboardName();
+        if (pd.name != null && !pd.name.equals(name)) byName.remove(pd.name, p.getUUID());
+        pd.name = name;
+        byName.put(name, p.getUUID());
         return pd;
     }
 
@@ -235,9 +277,13 @@ final class Data {
         return null;
     }
 
-    // puts a player on a team and, if that team has no leader yet, makes them it
+    // puts a player on a team and, if that team has no leader yet, makes them it. if they
+    // were leading the team they left, that role passes to whoever is still on it
     void assignTeam(UUID uid, String team) {
-        get(uid).team = team;
+        PlayerData pd = get(uid);
+        String old = pd.team;
+        pd.team = team;
+        if (old != null && !old.equals(team) && uid.equals(teamLeaders.get(old))) repickLeader(old);
         if (team != null) teamLeaders.putIfAbsent(team, uid);
     }
 
