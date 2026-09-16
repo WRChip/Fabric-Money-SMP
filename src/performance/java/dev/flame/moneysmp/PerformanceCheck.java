@@ -113,9 +113,9 @@ public final class PerformanceCheck {
         require(Files.readString(file).contains("not-a-uuid"), "unreadable data.json must never be overwritten");
 
         Path odd = Files.createTempDirectory(Path.of("build"), "data-odd-");
-        Files.writeString(odd.resolve("data.json"), "{\"teamcount\": 9, \"teamcount_set\": true, \"disabledteams\": [\"rED\", \"Pink\"],"
+        Files.writeString(odd.resolve("data.json"), "{\"teamcount\": 15, \"teamcount_set\": true, \"disabledteams\": [\"rED\", \"Cyan\"],"
             + " \"players\": {\"" + uid + "\": {\"name\": \"t\", \"money\": 1, \"team\": \"gold\", \"tier\": \"s\"},"
-            + " \"" + UUID.randomUUID() + "\": {\"name\": \"u\", \"money\": 1, \"team\": \"Pink\", \"tier\": \"X\"}}}");
+            + " \"" + UUID.randomUUID() + "\": {\"name\": \"u\", \"money\": 1, \"team\": \"Cyan\", \"tier\": \"X\"}}}");
         Data lenient = new Data(odd, null);
         try {
             lenient.load();

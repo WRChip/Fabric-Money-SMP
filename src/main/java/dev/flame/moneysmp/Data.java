@@ -74,7 +74,10 @@ final class Data {
         disabledTeams.clear();
         teamLeaders.clear();
         readOnly = false;
-        if (!Files.exists(file)) return;
+        if (!Files.exists(file)) {
+            disabledTeams.addAll(Teams.DEFAULT_DISABLED);
+            return;
+        }
         try {
             read(JsonParser.parseString(Files.readString(file)).getAsJsonObject());
         } catch (IOException | RuntimeException e) {

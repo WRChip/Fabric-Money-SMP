@@ -13,11 +13,14 @@ import java.util.List;
 import java.util.Set;
 
 final class Teams {
-    static final List<String> NAMES = List.of("Red", "Blue", "Purple", "Green", "White", "Gold");
+    // Red through Gold are enabled by default (see Data.disabledTeams); Yellow, Aqua and
+    // Pink still exist and can be turned on with /moneysmp team enable
+    static final List<String> NAMES = List.of("Red", "Blue", "Purple", "Green", "White", "Gold", "Yellow", "Aqua", "Pink");
+    static final Set<String> DEFAULT_DISABLED = Set.of("Yellow", "Aqua", "Pink");
 
     private static final ChatFormatting[] MC_COLORS = {
-        ChatFormatting.RED, ChatFormatting.BLUE, ChatFormatting.DARK_PURPLE,
-        ChatFormatting.GREEN, ChatFormatting.WHITE, ChatFormatting.GOLD
+        ChatFormatting.RED, ChatFormatting.BLUE, ChatFormatting.DARK_PURPLE, ChatFormatting.GREEN,
+        ChatFormatting.WHITE, ChatFormatting.GOLD, ChatFormatting.YELLOW, ChatFormatting.AQUA, ChatFormatting.LIGHT_PURPLE
     };
 
     private Teams() {}
@@ -31,8 +34,18 @@ final class Teams {
             case "Green" -> "&a";
             case "White" -> "&f";
             case "Gold" -> "&6";
+            case "Yellow" -> "&e";
+            case "Aqua" -> "&b";
+            case "Pink" -> "&d";
             default -> "&7";
         };
+    }
+
+    // "&cRed &9Blue ..." for every team, for help text and error messages
+    static String colorList() {
+        StringBuilder sb = new StringBuilder();
+        for (String t : NAMES) sb.append(color(t)).append(t).append(' ');
+        return sb.toString().trim();
     }
 
     // first `count` team slots, minus whichever of those are disabled

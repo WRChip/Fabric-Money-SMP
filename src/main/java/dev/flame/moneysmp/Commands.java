@@ -344,6 +344,7 @@ final class Commands {
             send(s, "  &7&lTeams &8(count: " + data().teamCount + "):");
             send(s, "  &c1 Red  &92 Blue  &53 Purple");
             send(s, "  &a4 Green  &f5 White  &66 Gold");
+            send(s, "  &e7 Yellow  &b8 Aqua  &d9 Pink");
         }
         send(s, LINE);
         send(s, "");
@@ -691,7 +692,7 @@ final class Commands {
         }
         String team = Teams.normalise(args[2]);
         if (!Teams.NAMES.contains(team)) {
-            send(s, Fmt.PREFIX + " &cInvalid team &f" + args[2] + "&c. &7Teams: &cRed &9Blue &5Purple &aGreen &fWhite &6Gold");
+            send(s, Fmt.PREFIX + " &cInvalid team &f" + args[2] + "&c. &7Teams: " + Teams.colorList());
             return;
         }
         if (enable) {
@@ -730,7 +731,7 @@ final class Commands {
         }
         if (args.length < 4) {
             send(s, Fmt.PREFIX + " &cUsage: &f/moneysmp team set <player> <team>");
-            send(s, "  &7Teams: &cRed &9Blue &5Purple &aGreen &fWhite &6Gold");
+            send(s, "  &7Teams: " + Teams.colorList());
             return;
         }
         String name = args[2];
