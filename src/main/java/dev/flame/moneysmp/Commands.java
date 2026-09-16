@@ -373,12 +373,13 @@ final class Commands {
             String col = Teams.color(t);
             StringBuilder members = new StringBuilder();
             int count = 0;
-            for (ServerPlayer p : onlinePlayers()) {
-                if (!t.equals(data().team(p.getUUID()))) continue;
+            for (Map.Entry<UUID, Data.PlayerData> e : data().players.entrySet()) {
+                if (!t.equals(e.getValue().team)) continue;
                 count++;
                 if (members.length() > 0) members.append("&7, ");
-                boolean leader = data().isLeader(p.getUUID(), t);
-                members.append(col).append(p.getScoreboardName()).append(leader ? "&6★" : "");
+                boolean leader = data().isLeader(e.getKey(), t);
+                boolean isOnline = online(e.getKey()) != null;
+                members.append(col).append(e.getValue().name).append(leader ? "&6★" : "").append(isOnline ? "" : "&8*");
             }
             if (count > 0) {
                 send(s, "  " + col + "&l" + t + " &8(" + count + ")  &8»  " + members);
@@ -393,6 +394,7 @@ final class Commands {
             names.setLength(names.length() - 2);
             send(s, "  &7Disabled: " + names);
         }
+        send(s, "  &6★ &7= leader   &8* &7= offline");
         send(s, "");
     }
 
