@@ -17,9 +17,11 @@ import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
@@ -44,13 +46,15 @@ final class Data {
     int teamCount = Teams.NAMES.size();
     boolean teamCountSet;
     Integer teamMax;
+    final Set<String> disabledTeams = new HashSet<>();
 
     private final Path file;
     private final MinecraftServer server;
     private final ExecutorService writer = Executors.newSingleThreadExecutor(r -> new Thread(r, "MoneySMP-save"));
     private CompletableFuture<Void> pending = CompletableFuture.completedFuture(null);
 
-    private record Snapshot(int teamCount, boolean teamCountSet, Integer teamMax, Map<UUID, PlayerData> players, List<Tx> transactions) {}
+    private record Snapshot(int teamCount, boolean teamCountSet, Integer teamMax, Set<String> disabledTeams,
+                             Map<UUID, PlayerData> players, List<Tx> transactions) {}
 
     Data(Path dir, MinecraftServer server) {
         this.file = dir.resolve("data.json");
@@ -61,6 +65,7 @@ final class Data {
         players.clear();
         byName.clear();
         transactions.clear();
+        disabledTeams.clear();
         if (!Files.exists(file)) return;
         JsonObject y;
         try {
@@ -72,6 +77,9 @@ final class Data {
         teamCountSet = y.has("teamcount_set") && y.get("teamcount_set").getAsBoolean();
         teamCount = teamCountSet && y.has("teamcount") ? y.get("teamcount").getAsInt() : Teams.NAMES.size();
         teamMax = y.has("teammax") && !y.get("teammax").isJsonNull() ? y.get("teammax").getAsInt() : null;
+        if (y.has("disabledteams")) {
+            for (JsonElement el : y.getAsJsonArray("disabledteams")) disabledTeams.add(el.getAsString());
+        }
         if (y.has("players")) {
             for (Map.Entry<String, JsonElement> e : y.getAsJsonObject("players").entrySet()) {
                 JsonObject o = e.getValue().getAsJsonObject();
@@ -123,7 +131,7 @@ final class Data {
             saved.tier = pd.tier;
             copy.put(uid, saved);
         });
-        return new Snapshot(teamCount, teamCountSet, teamMax, copy, List.copyOf(transactions));
+        return new Snapshot(teamCount, teamCountSet, teamMax, Set.copyOf(disabledTeams), copy, List.copyOf(transactions));
     }
 
     private void write(Snapshot snapshot) {
@@ -137,6 +145,9 @@ final class Data {
                     out.name("teamcount_set").value(true);
                 }
                 if (snapshot.teamMax() != null) out.name("teammax").value(snapshot.teamMax());
+                out.name("disabledteams").beginArray();
+                for (String t : snapshot.disabledTeams()) out.value(t);
+                out.endArray();
                 out.name("players").beginObject();
                 for (Map.Entry<UUID, PlayerData> e : snapshot.players().entrySet()) {
                     out.name(e.getKey().toString());

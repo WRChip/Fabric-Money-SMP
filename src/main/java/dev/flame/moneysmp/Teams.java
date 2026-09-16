@@ -8,15 +8,16 @@ import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.scores.PlayerTeam;
 import net.minecraft.world.scores.Team;
 
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 
 final class Teams {
-    static final List<String> NAMES = List.of("Red", "Blue", "Green", "Yellow", "Purple", "Aqua", "Orange", "Pink", "White");
+    static final List<String> NAMES = List.of("Red", "Blue", "Purple", "Green", "White", "Gold");
 
     private static final ChatFormatting[] MC_COLORS = {
-        ChatFormatting.RED, ChatFormatting.BLUE, ChatFormatting.GREEN, ChatFormatting.YELLOW,
-        ChatFormatting.DARK_PURPLE, ChatFormatting.AQUA, ChatFormatting.GOLD, ChatFormatting.LIGHT_PURPLE,
-        ChatFormatting.WHITE
+        ChatFormatting.RED, ChatFormatting.BLUE, ChatFormatting.DARK_PURPLE,
+        ChatFormatting.GREEN, ChatFormatting.WHITE, ChatFormatting.GOLD
     };
 
     private Teams() {}
@@ -26,19 +27,19 @@ final class Teams {
         return switch (team) {
             case "Red" -> "&c";
             case "Blue" -> "&9";
-            case "Green" -> "&a";
-            case "Yellow" -> "&e";
             case "Purple" -> "&5";
-            case "Aqua" -> "&b";
-            case "Orange" -> "&6";
-            case "Pink" -> "&d";
+            case "Green" -> "&a";
             case "White" -> "&f";
+            case "Gold" -> "&6";
             default -> "&7";
         };
     }
 
-    static List<String> active(int count) {
-        return NAMES.subList(0, count);
+    // first `count` team slots, minus whichever of those are disabled
+    static List<String> active(int count, Set<String> disabled) {
+        List<String> out = new ArrayList<>();
+        for (String t : NAMES.subList(0, count)) if (!disabled.contains(t)) out.add(t);
+        return out;
     }
 
     // same capitalisation the script does: "rED" -> "Red"

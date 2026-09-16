@@ -59,7 +59,7 @@ final class Auction {
         if (size > data().teamCount) return "&cEach tier has &f" + size + " &cplayers but there are only &f" + data().teamCount + " &cteams. Raise &f/moneysmp teamcount&c.";
         if (teamed == 0) return "&cNo team has a player yet. Use &f/moneysmp randomteams <tier> &cfirst.";
         if (!pending) return "&cEveryone with a tier already has a team.";
-        for (String t : Teams.active(data().teamCount)) {
+        for (String t : Teams.active(data().teamCount, data().disabledTeams)) {
             double total = 0;
             int members = 0;
             for (Data.PlayerData pd : data().players.values()) {
@@ -195,7 +195,7 @@ final class Auction {
         String name = sold.name;
         if (bidder == null) {
             List<String> open = new ArrayList<>();
-            for (String t : Teams.active(data().teamCount)) if (data().teamMember(t, tier) == null) open.add(t);
+            for (String t : Teams.active(data().teamCount, data().disabledTeams)) if (data().teamMember(t, tier) == null) open.add(t);
             if (open.isEmpty()) {
                 running = false;
                 player = null;

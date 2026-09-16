@@ -47,13 +47,18 @@ final class Commands {
             return SharedSuggestionProvider.suggest(names, b);
         };
         SuggestionProvider<CommandSourceStack> teams = (ctx, b) ->
-            SharedSuggestionProvider.suggest(Teams.active(c.data().teamCount), b);
+            SharedSuggestionProvider.suggest(Teams.active(c.data().teamCount, c.data().disabledTeams), b);
+        SuggestionProvider<CommandSourceStack> allTeams = (ctx, b) ->
+            SharedSuggestionProvider.suggest(Teams.NAMES, b);
         SuggestionProvider<CommandSourceStack> tiers = (ctx, b) ->
             SharedSuggestionProvider.suggest(Tiers.NAMES, b);
         SuggestionProvider<CommandSourceStack> times = (ctx, b) ->
             SharedSuggestionProvider.suggest(List.of("30m", "1h", "6h", "1d", "7d"), b);
-        SuggestionProvider<CommandSourceStack> counts = (ctx, b) ->
-            SharedSuggestionProvider.suggest(List.of("1", "2", "3", "4", "5", "6", "7", "8", "9"), b);
+        SuggestionProvider<CommandSourceStack> counts = (ctx, b) -> {
+            List<String> nums = new ArrayList<>();
+            for (int i = 1; i <= Teams.NAMES.size(); i++) nums.add(String.valueOf(i));
+            return SharedSuggestionProvider.suggest(nums, b);
+        };
         Predicate<CommandSourceStack> admin = src -> Permissions.check(src, "moneysmp.admin", PermissionLevel.GAMEMASTERS);
 
         // every node runs the same handler with whatever was typed so far, so usage
@@ -93,7 +98,11 @@ final class Commands {
             .then(literal("team").requires(admin).executes(c.exec("team"))
                 .then(literal("set").executes(c.exec("team set"))
                     .then(argument("player", word()).suggests(players).executes(c.exec("team set", "player"))
-                        .then(argument("team", word()).suggests(teams).executes(c.exec("team set", "player", "team"))))));
+                        .then(argument("team", word()).suggests(teams).executes(c.exec("team set", "player", "team")))))
+                .then(literal("enable").executes(c.exec("team enable"))
+                    .then(argument("team", word()).suggests(allTeams).executes(c.exec("team enable", "team"))))
+                .then(literal("disable").executes(c.exec("team disable"))
+                    .then(argument("team", word()).suggests(allTeams).executes(c.exec("team disable", "team")))));
 
         for (String sub : new String[]{"give", "take", "set"}) {
             root.then(literal(sub).requires(admin).executes(c.exec(sub))
@@ -271,7 +280,7 @@ final class Commands {
                     case "teambal" -> teambal(s);
                     case "teammax" -> teammax(s, args);
                     case "teamcount" -> teamcount(s, args);
-                    case "team" -> teamSet(s, args);
+                    case "team" -> team(s, args);
                     case "randomteams" -> {
                         if (args.length > 1) randomteams(s, args[1]);
                         else randomteams(s);
@@ -309,14 +318,16 @@ final class Commands {
             send(s, "  &f/moneysmp teamcount &e<1-9>");
             send(s, "  &f/moneysmp randomteams &8[tier]");
             send(s, "  &f/moneysmp team set &e<player> <team>");
+            send(s, "  &f/moneysmp team enable &e<team>");
+            send(s, "  &f/moneysmp team disable &e<team>");
             send(s, "  &f/moneysmp tier set &e<player> <S-F>");
             send(s, "  &f/moneysmp tier clear &e<player>");
             send(s, "  &f/moneysmp auction &8[stop]");
             send(s, "  &f/moneysmp transaction &e<time> [page]  &8(e.g. 1h 30m 7d)");
             send(s, "");
             send(s, "  &7&lTeams &8(count: " + data().teamCount + "):");
-            send(s, "  &c1 Red  &92 Blue  &a3 Green  &e4 Yellow");
-            send(s, "  &55 Purple  &b6 Aqua  &67 Orange  &d8 Pink  &f9 White");
+            send(s, "  &c1 Red  &92 Blue  &53 Purple");
+            send(s, "  &a4 Green  &f5 White  &66 Gold");
         }
         send(s, LINE);
         send(s, "");
@@ -340,7 +351,7 @@ final class Commands {
         send(s, "");
         send(s, Fmt.PREFIX + " &7Active Teams  &8|  &7Count: &f" + data().teamCount);
         send(s, "");
-        for (String t : Teams.active(data().teamCount)) {
+        for (String t : Teams.active(data().teamCount, data().disabledTeams)) {
             String col = Teams.color(t);
             StringBuilder members = new StringBuilder();
             int count = 0;
@@ -355,6 +366,13 @@ final class Commands {
             } else {
                 send(s, "  " + col + "&l" + t + " &8(0)  &8»  &7Empty");
             }
+        }
+        if (!data().disabledTeams.isEmpty()) {
+            send(s, "");
+            StringBuilder names = new StringBuilder();
+            for (String t : data().disabledTeams) names.append(Teams.color(t)).append(t).append("&7, ");
+            names.setLength(names.length() - 2);
+            send(s, "  &7Disabled: " + names);
         }
         send(s, "");
     }
@@ -534,7 +552,7 @@ final class Commands {
         send(s, "");
         send(s, Fmt.PREFIX + " &a&l⚔ Team Balances ⚔");
         send(s, "");
-        for (String t : Teams.active(data().teamCount)) {
+        for (String t : Teams.active(data().teamCount, data().disabledTeams)) {
             String col = Teams.color(t);
             double total = 0;
             int count = 0;
@@ -588,8 +606,8 @@ final class Commands {
             send(s, Fmt.PREFIX + " &cMinimum is &e1&c.");
             return;
         }
-        if (n > 9) {
-            send(s, Fmt.PREFIX + " &cMaximum is &e9&c.");
+        if (n > Teams.NAMES.size()) {
+            send(s, Fmt.PREFIX + " &cMaximum is &e" + Teams.NAMES.size() + "&c.");
             return;
         }
         data().teamCount = n.intValue();
@@ -597,25 +615,76 @@ final class Commands {
         send(s, "");
         send(s, Fmt.PREFIX + " &aTeam count: &e&l" + data().teamCount + "&a. Active teams:");
         int i = 1;
-        for (String t : Teams.active(data().teamCount)) {
+        for (String t : Teams.active(data().teamCount, data().disabledTeams)) {
             send(s, "    " + Teams.color(t) + "&l" + (i++) + ". " + t);
         }
         send(s, "");
     }
 
+    private void team(CommandSourceStack s, String[] args) {
+        if (args.length < 2) {
+            send(s, Fmt.PREFIX + " &cUsage: &f/moneysmp team <set|enable|disable> ...");
+            return;
+        }
+        switch (args[1].toLowerCase()) {
+            case "set" -> teamSet(s, args);
+            case "enable" -> teamToggle(s, args, true);
+            case "disable" -> teamToggle(s, args, false);
+            default -> send(s, Fmt.PREFIX + " &cUsage: &f/moneysmp team <set|enable|disable> ...");
+        }
+    }
+
+    private void teamToggle(CommandSourceStack s, String[] args, boolean enable) {
+        if (args.length < 3) {
+            send(s, Fmt.PREFIX + " &cUsage: &f/moneysmp team " + (enable ? "enable" : "disable") + " <team>");
+            return;
+        }
+        String team = Teams.normalise(args[2]);
+        if (!Teams.NAMES.contains(team)) {
+            send(s, Fmt.PREFIX + " &cInvalid team &f" + args[2] + "&c. &7Teams: &cRed &9Blue &5Purple &aGreen &fWhite &6Gold");
+            return;
+        }
+        if (enable) {
+            if (!data().disabledTeams.remove(team)) {
+                send(s, Fmt.PREFIX + " &7Team " + Teams.color(team) + team + " &7is already enabled.");
+                return;
+            }
+            send(s, Fmt.PREFIX + " &aEnabled team " + Teams.color(team) + "&l" + team + "&a.");
+            return;
+        }
+        if (!data().disabledTeams.add(team)) {
+            send(s, Fmt.PREFIX + " &7Team " + Teams.color(team) + team + " &7is already disabled.");
+            return;
+        }
+        List<UUID> cleared = new ArrayList<>();
+        for (Map.Entry<UUID, Data.PlayerData> e : data().players.entrySet()) {
+            if (team.equals(e.getValue().team)) cleared.add(e.getKey());
+        }
+        for (UUID uid : cleared) {
+            data().get(uid).team = null;
+            ServerPlayer p = online(uid);
+            if (p != null) {
+                plugin.sync(p);
+                send(p, Fmt.PREFIX + " &7Team " + Teams.color(team) + team + " &7was disabled; you were removed from it.");
+            }
+        }
+        send(s, Fmt.PREFIX + " &cDisabled team " + Teams.color(team) + "&l" + team + "&c."
+            + (cleared.isEmpty() ? "" : " &7Removed &f" + cleared.size() + " &7player(s) from it."));
+    }
+
     private void teamSet(CommandSourceStack s, String[] args) {
-        if (args.length < 2 || !args[1].equalsIgnoreCase("set") || args.length < 3) {
+        if (args.length < 3) {
             send(s, Fmt.PREFIX + " &cUsage: &f/moneysmp team set <player> <team>");
             return;
         }
         if (args.length < 4) {
             send(s, Fmt.PREFIX + " &cUsage: &f/moneysmp team set <player> <team>");
-            send(s, "  &7Teams: &cRed &9Blue &aGreen &eYellow &5Purple &bAqua &6Orange &dPink &fWhite");
+            send(s, "  &7Teams: &cRed &9Blue &5Purple &aGreen &fWhite &6Gold");
             return;
         }
         String name = args[2];
         String newTeam = Teams.normalise(args[3]);
-        List<String> active = Teams.active(data().teamCount);
+        List<String> active = Teams.active(data().teamCount, data().disabledTeams);
         if (!active.contains(newTeam)) {
             send(s, Fmt.PREFIX + " &cInvalid team &f" + newTeam + "&c. Active teams:");
             for (String t : active) send(s, "  " + Teams.color(t) + "&l" + t);
@@ -643,46 +712,63 @@ final class Commands {
         send(s, Fmt.PREFIX + " &aAssigned &f" + name + " &ato team " + Teams.color(newTeam) + "&l" + newTeam + "&a.");
     }
 
+    // assigns every known player, offline included, then disables any team that ended up empty
     private void randomteams(CommandSourceStack s) {
         if (data().teamMax == null) {
             send(s, Fmt.PREFIX + " &cRun &f/moneysmp teammax <n> &cfirst.");
             return;
         }
         int max = data().teamMax;
-        int tc = data().teamCount;
-        List<ServerPlayer> online = new ArrayList<>(onlinePlayers());
-        int cap = max * tc;
-        if (online.size() > cap) {
-            send(s, Fmt.PREFIX + " &cToo many players! Capacity: &f" + cap + " &8(" + tc + " x " + max + ")&7. Online: &f" + online.size());
+        List<String> active = new ArrayList<>(Teams.active(data().teamCount, data().disabledTeams));
+        if (active.isEmpty()) {
+            send(s, Fmt.PREFIX + " &cNo teams are enabled. Use &f/moneysmp team enable <team>&c.");
             return;
         }
-        List<String> active = Teams.active(tc);
-        for (Data.PlayerData pd : data().players.values()) {
-            if (pd.team != null && active.contains(pd.team)) pd.team = null;
+        List<UUID> pool = new ArrayList<>(data().players.keySet());
+        int cap = max * active.size();
+        if (pool.size() > cap) {
+            send(s, Fmt.PREFIX + " &cToo many players! Capacity: &f" + cap + " &8(" + active.size() + " x " + max + ")&7. Players: &f" + pool.size());
+            return;
         }
-        for (ServerPlayer p : online) data().get(p).team = null;
+        for (Data.PlayerData pd : data().players.values()) {
+            if (active.contains(pd.team)) pd.team = null;
+        }
 
-        int[] counts = new int[tc];
-        Collections.shuffle(online);
-        for (ServerPlayer p : online) {
+        int[] counts = new int[active.size()];
+        Collections.shuffle(pool);
+        for (UUID uid : pool) {
             List<Integer> open = new ArrayList<>();
-            for (int i = 0; i < tc; i++) if (counts[i] < max) open.add(i);
+            for (int i = 0; i < active.size(); i++) if (counts[i] < max) open.add(i);
             int ti = open.get(ThreadLocalRandom.current().nextInt(open.size()));
             counts[ti]++;
-            data().get(p).team = active.get(ti);
+            data().get(uid).team = active.get(ti);
         }
 
         broadcast("");
         broadcast(Fmt.PREFIX + " &a&l⚔  TEAMS HAVE BEEN RANDOMISED  ⚔");
         broadcast("");
-        for (ServerPlayer p : online) {
-            plugin.sync(p);
-            String t = data().team(p.getUUID());
-            String col = Teams.color(t);
-            broadcast("  " + col + "&l" + p.getScoreboardName() + "  &8»  " + col + t);
-            send(p, Fmt.PREFIX + " &7You are on team " + col + "&l" + t);
+        for (UUID uid : pool) {
+            Data.PlayerData pd = data().get(uid);
+            String col = Teams.color(pd.team);
+            ServerPlayer p = online(uid);
+            String tag = p != null ? "&a(online)" : "&8(offline)";
+            broadcast("  " + col + "&l" + pd.name + " " + tag + "  &8»  " + col + pd.team);
+            if (p != null) {
+                plugin.sync(p);
+                send(p, Fmt.PREFIX + " &7You are on team " + col + "&l" + pd.team);
+            }
         }
         broadcast("");
+
+        List<String> emptied = new ArrayList<>();
+        for (int i = 0; i < active.size(); i++) if (counts[i] == 0) emptied.add(active.get(i));
+        if (!emptied.isEmpty()) {
+            data().disabledTeams.addAll(emptied);
+            StringBuilder names = new StringBuilder();
+            for (String t : emptied) names.append(Teams.color(t)).append(t).append("&7, ");
+            names.setLength(names.length() - 2);
+            broadcast(Fmt.PREFIX + " &7Disabled empty team(s): " + names);
+        }
     }
 
     // every player of one tier onto a different team each, offline included.
@@ -699,7 +785,7 @@ final class Commands {
             send(s, Fmt.PREFIX + " &cNobody is in tier " + Tiers.color(tier) + tier + "&c.");
             return;
         }
-        List<String> active = new ArrayList<>(Teams.active(data().teamCount));
+        List<String> active = new ArrayList<>(Teams.active(data().teamCount, data().disabledTeams));
         if (pool.size() > active.size()) {
             send(s, Fmt.PREFIX + " &cTier " + Tiers.color(tier) + tier + " &chas &f" + pool.size() + " &cplayers but there are only &f" + active.size() + " &cteams.");
             return;
