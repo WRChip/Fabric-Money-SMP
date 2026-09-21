@@ -59,11 +59,29 @@ final class ControlPoints {
     record Point(ResourceKey<Level> dim, BlockPos pos) {}
     private record Placed(ResourceKey<Level> dim, BlockPos pos, BlockState state) {}
 
+    // several prize sets. "once" hands them out in order, each set a single time per event;
+    // "random" rolls any set on every capture
+    static final class Pool {
+        final List<List<ItemStack>> sets = new ArrayList<>();
+        boolean random;
+        int next;
+
+        List<ItemStack> take() {
+            if (sets.isEmpty()) return List.of();
+            if (random) return sets.get(ThreadLocalRandom.current().nextInt(sets.size()));
+            return next < sets.size() ? sets.get(next++) : List.of();
+        }
+
+        String mode() {
+            return random ? "random" : "once";
+        }
+    }
+
     private final MoneySMP plugin;
     private Path file;
     final Map<Integer, Point> points = new TreeMap<>();
-    final List<ItemStack> loot = new ArrayList<>();
-    final List<ItemStack> superLoot = new ArrayList<>();
+    final Pool loot = new Pool();
+    final Pool superLoot = new Pool();
 
     boolean running;
     final Set<Integer> superPoints = new HashSet<>();
@@ -95,8 +113,8 @@ final class ControlPoints {
     void load(Path dir) {
         file = dir.resolve("points.json");
         points.clear();
-        loot.clear();
-        superLoot.clear();
+        loot.sets.clear();
+        superLoot.sets.clear();
         superPoints.clear();
         owner.clear();
         progress.clear();
@@ -111,10 +129,12 @@ final class ControlPoints {
                     points.put(Integer.parseInt(e.getKey()), new Point(dim(o), pos(o)));
                 }
             }
-            readItems(y, "loot", loot);
-            readItems(y, "superloot", superLoot);
+            readPool(y, "loot", loot);
+            readPool(y, "superloot", superLoot);
             if (y.has("event")) {
                 JsonObject ev = y.getAsJsonObject("event");
+                loot.next = ev.has("lootnext") ? ev.get("lootnext").getAsInt() : 0;
+                superLoot.next = ev.has("superlootnext") ? ev.get("superlootnext").getAsInt() : 0;
                 for (JsonElement el : ev.getAsJsonArray("super")) superPoints.add(el.getAsInt());
                 for (Map.Entry<String, JsonElement> e : ev.getAsJsonObject("owner").entrySet()) {
                     owner.put(Integer.parseInt(e.getKey()), e.getValue().getAsString());
@@ -142,10 +162,12 @@ final class ControlPoints {
             ps.add(String.valueOf(n), o);
         });
         y.add("points", ps);
-        y.add("loot", items(loot));
-        y.add("superloot", items(superLoot));
+        y.add("loot", pool(loot));
+        y.add("superloot", pool(superLoot));
         if (running) {
             JsonObject ev = new JsonObject();
+            ev.addProperty("lootnext", loot.next);
+            ev.addProperty("superlootnext", superLoot.next);
             JsonArray sup = new JsonArray();
             for (int n : superPoints) sup.add(n);
             ev.add("super", sup);
@@ -170,23 +192,44 @@ final class ControlPoints {
         }
     }
 
-    private JsonArray items(List<ItemStack> list) {
-        JsonArray arr = new JsonArray();
-        for (ItemStack st : list) {
-            ItemStack.CODEC.encodeStart(ops(), st)
-                .resultOrPartial(err -> MoneySMP.LOG.warn("points.json: could not save item: {}", err))
-                .ifPresent(arr::add);
+    private JsonObject pool(Pool pool) {
+        JsonObject o = new JsonObject();
+        o.addProperty("mode", pool.mode());
+        JsonArray sets = new JsonArray();
+        for (List<ItemStack> set : pool.sets) {
+            JsonArray arr = new JsonArray();
+            for (ItemStack st : set) {
+                ItemStack.CODEC.encodeStart(ops(), st)
+                    .resultOrPartial(err -> MoneySMP.LOG.warn("points.json: could not save item: {}", err))
+                    .ifPresent(arr::add);
+            }
+            sets.add(arr);
         }
-        return arr;
+        o.add("sets", sets);
+        return o;
     }
 
-    private void readItems(JsonObject y, String key, List<ItemStack> into) {
+    // 1.2.0 stored a single flat item list; read that as one set
+    private void readPool(JsonObject y, String key, Pool into) {
         if (!y.has(key)) return;
-        for (JsonElement el : y.getAsJsonArray(key)) {
+        JsonElement el = y.get(key);
+        if (el.isJsonArray()) {
+            into.sets.add(readItems(el.getAsJsonArray(), key));
+            return;
+        }
+        JsonObject o = el.getAsJsonObject();
+        into.random = o.has("mode") && o.get("mode").getAsString().equals("random");
+        for (JsonElement set : o.getAsJsonArray("sets")) into.sets.add(readItems(set.getAsJsonArray(), key));
+    }
+
+    private List<ItemStack> readItems(JsonArray arr, String key) {
+        List<ItemStack> out = new ArrayList<>();
+        for (JsonElement el : arr) {
             ItemStack.CODEC.parse(ops(), el)
                 .resultOrPartial(err -> MoneySMP.LOG.warn("points.json: dropping item in {}: {}", key, err))
-                .ifPresent(into::add);
+                .ifPresent(out::add);
         }
+        return out;
     }
 
     private static void put(JsonObject o, ResourceKey<Level> dim, BlockPos pos) {
@@ -217,11 +260,8 @@ final class ControlPoints {
         return true;
     }
 
-    void setLoot(boolean sup, List<ItemStack> items) {
-        List<ItemStack> pool = sup ? superLoot : loot;
-        pool.clear();
-        pool.addAll(items);
-        save();
+    Pool pool(boolean sup) {
+        return sup ? superLoot : loot;
     }
 
     // players never show on the locator bar; only control points do
@@ -246,6 +286,8 @@ final class ControlPoints {
         owner.clear();
         progress.clear();
         placed.clear();
+        loot.next = 0;
+        superLoot.next = 0;
         List<Integer> ids = new ArrayList<>(points.keySet());
         Collections.shuffle(ids);
         for (int i = 0; i < Math.round(ids.size() / 4.0); i++) superPoints.add(ids.get(i));
@@ -405,7 +447,7 @@ final class ControlPoints {
                 plugin.notify(e.getKey(), "&a&l+ $" + Fmt.money(cfg.controlPointMoney) + "  &7Point #" + n + " captured!  &8|  &a$ &e" + Fmt.money(pd.money), 6);
             }
         }
-        drop(level, pt.pos(), sup ? superLoot : loot);
+        drop(level, pt.pos(), pool(sup).take());
 
         String col = Teams.color(team);
         broadcast("");

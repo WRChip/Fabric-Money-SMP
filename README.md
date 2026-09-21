@@ -39,12 +39,12 @@ Admin (`moneysmp.admin`):
 - `/moneysmp fine <player> <amount> [reason]`
 - `/moneysmp team set|enable|disable|leader <team>`
 - `/moneysmp point <number>` (set a control point where you stand), `point remove <number>`, `point list`
-- `/moneysmp point loot|superloot` (prize from the container in your hand)
+- `/moneysmp point loot|superloot add|clear|list|mode <once|random>` (prize sets from the container in your hand)
 - `/moneysmp event control-point start|stop`
 
 ## Control points
 
-Each point gets a beacon with a light grey beam and a 5-block particle ring. One player standing in the ring earns their team 5% every 30 seconds, so five players capture a point in two minutes. When several teams share a ring only the larger team gains, at the pace of its extra players. A quarter of the points (rounded) are picked as super points each event: darker netherite-coloured beam, four times slower to capture, and they drop the `superloot` prize instead of `loot`. A capture pays the team `controlPointPoints` and every member `controlPointMoney` (both in `config.json`), turns the beam the team colour and drops the prize in the ring. The locator bar shows only points: grey while unclaimed, team colour once captured, and it disappears when every point is taken. The platforms are restored when the event ends and a running event survives a restart.
+Each point gets a beacon with a light grey beam and a 5-block particle ring. One player standing in the ring earns their team 5% every 30 seconds, so five players capture a point in two minutes. When several teams share a ring only the larger team gains, at the pace of its extra players. A quarter of the points (rounded) are picked as super points each event: darker netherite-coloured beam, four times slower to capture, and they draw from the `superloot` sets instead of `loot`. Each pool holds any number of prize sets, added one container at a time. In `once` mode captures hand the sets out in order, each a single time per event (later captures drop nothing once they run out); in `random` mode every capture rolls any set. A capture pays the team `controlPointPoints` and every member `controlPointMoney` (both in `config.json`), turns the beam the team colour and drops the prize in the ring. The locator bar shows only points: grey while unclaimed, team colour once captured, and it disappears when every point is taken. The platforms are restored when the event ends and a running event survives a restart.
 
 ## Building
 

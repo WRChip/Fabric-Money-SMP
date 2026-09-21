@@ -72,6 +72,21 @@ final class Commands {
         };
         Predicate<CommandSourceStack> admin = src -> Permissions.check(src, "moneysmp.admin", PermissionLevel.GAMEMASTERS);
 
+        LiteralArgumentBuilder<CommandSourceStack> point = literal("point").requires(admin).executes(c.exec("point"))
+            .then(literal("list").executes(c.exec("point list")))
+            .then(literal("remove").executes(c.exec("point remove"))
+                .then(argument("number", word()).suggests(pointNums).executes(c.exec("point remove", "number"))))
+            .then(argument("number", word()).executes(c.exec("point", "number")));
+        for (String pool : new String[]{"loot", "superloot"}) {
+            point.then(literal(pool).executes(c.exec("point " + pool))
+                .then(literal("add").executes(c.exec("point " + pool + " add")))
+                .then(literal("clear").executes(c.exec("point " + pool + " clear")))
+                .then(literal("list").executes(c.exec("point " + pool + " list")))
+                .then(literal("mode").executes(c.exec("point " + pool + " mode"))
+                    .then(literal("once").executes(c.exec("point " + pool + " mode once")))
+                    .then(literal("random").executes(c.exec("point " + pool + " mode random")))));
+        }
+
         // every node runs the same handler with whatever was typed so far, so usage
         // messages and errors match the greedy fallback exactly
         LiteralArgumentBuilder<CommandSourceStack> root = literal("moneysmp")
@@ -117,13 +132,7 @@ final class Commands {
                     .then(argument("team", word()).suggests(allTeams).executes(c.exec("team disable", "team"))))
                 .then(literal("leader").executes(c.exec("team leader"))
                     .then(argument("player", word()).suggests(players).executes(c.exec("team leader", "player")))))
-            .then(literal("point").requires(admin).executes(c.exec("point"))
-                .then(literal("list").executes(c.exec("point list")))
-                .then(literal("loot").executes(c.exec("point loot")))
-                .then(literal("superloot").executes(c.exec("point superloot")))
-                .then(literal("remove").executes(c.exec("point remove"))
-                    .then(argument("number", word()).suggests(pointNums).executes(c.exec("point remove", "number"))))
-                .then(argument("number", word()).executes(c.exec("point", "number"))))
+            .then(point)
             .then(literal("event").requires(admin).executes(c.exec("event"))
                 .then(literal("control-point").executes(c.exec("event control-point"))
                     .then(literal("start").executes(c.exec("event control-point start")))
@@ -362,7 +371,7 @@ final class Commands {
             send(s, "  &f/moneysmp post-auction");
             send(s, "  &f/moneysmp point &e<number>  &8(control point where you stand)");
             send(s, "  &f/moneysmp point remove &e<number>  &8/ &fpoint list");
-            send(s, "  &f/moneysmp point loot &8/ &fsuperloot  &8(from the container in hand)");
+            send(s, "  &f/moneysmp point loot&8/&fsuperloot &eadd&8|&eclear&8|&elist&8|&emode <once|random>");
             send(s, "  &f/moneysmp event control-point &estart&8/&estop");
             send(s, "  &f/moneysmp transaction &e<time> [page]  &8(e.g. 1h 30m 7d)");
             send(s, "");
@@ -991,7 +1000,7 @@ final class Commands {
     private void point(CommandSourceStack s, String[] args) {
         ControlPoints cp = plugin.points;
         if (args.length < 2) {
-            send(s, Fmt.PREFIX + " &cUsage: &f/moneysmp point <number> &8| &fremove <number> &8| &flist &8| &floot &8| &fsuperloot");
+            send(s, Fmt.PREFIX + " &cUsage: &f/moneysmp point <number> &8| &fremove <number> &8| &flist &8| &floot ... &8| &fsuperloot ...");
             return;
         }
         switch (args[1].toLowerCase()) {
@@ -1001,8 +1010,8 @@ final class Commands {
                     return;
                 }
                 send(s, "");
-                send(s, Fmt.PREFIX + " &7Control Points  &8|  &7Loot: &f" + cp.loot.size() + " &7items, super: &f" + cp.superLoot.size()
-                    + (cp.running ? "  &8|  &a&lEVENT RUNNING" : ""));
+                send(s, Fmt.PREFIX + " &7Control Points  &8|  &7Prizes: &f" + cp.loot.sets.size() + " &8(" + cp.loot.mode() + ")&7, super: &f"
+                    + cp.superLoot.sets.size() + " &8(" + cp.superLoot.mode() + ")" + (cp.running ? "  &8|  &a&lEVENT RUNNING" : ""));
                 for (Map.Entry<Integer, ControlPoints.Point> e : cp.points.entrySet()) {
                     var c = e.getValue().pos();
                     String held = cp.owner.get(e.getKey());
@@ -1012,27 +1021,7 @@ final class Commands {
                 }
                 send(s, "");
             }
-            case "loot", "superloot" -> {
-                ServerPlayer p = s.getPlayer();
-                if (p == null) {
-                    send(s, Fmt.PREFIX + " &cPlayers only.");
-                    return;
-                }
-                ItemContainerContents held = p.getMainHandItem().get(DataComponents.CONTAINER);
-                if (held == null) {
-                    send(s, Fmt.PREFIX + " &cHold a shulker box (or other container item) filled with the prize.");
-                    return;
-                }
-                List<ItemStack> items = new ArrayList<>();
-                for (ItemStack st : held.nonEmptyItemsCopy()) items.add(st);
-                if (items.isEmpty()) {
-                    send(s, Fmt.PREFIX + " &cThat container is empty.");
-                    return;
-                }
-                boolean sup = args[1].equalsIgnoreCase("superloot");
-                cp.setLoot(sup, items);
-                send(s, Fmt.PREFIX + " &aSaved &e" + items.size() + " &astack(s) as the " + (sup ? "&8&l✦ super &r&a" : "") + "control point prize.");
-            }
+            case "loot", "superloot" -> loot(s, args, args[1].equalsIgnoreCase("superloot"));
             case "remove" -> {
                 Integer n = args.length > 2 ? pointNumber(args[2]) : null;
                 if (n == null) {
@@ -1069,6 +1058,68 @@ final class Commands {
         }
     }
 
+    private void loot(CommandSourceStack s, String[] args, boolean sup) {
+        ControlPoints.Pool pool = plugin.points.pool(sup);
+        String name = sup ? "superloot" : "loot";
+        String label = sup ? "&8&l✦ super &r&aprize" : "prize";
+        String action = args.length > 2 ? args[2].toLowerCase() : "";
+        switch (action) {
+            case "add" -> {
+                ServerPlayer p = s.getPlayer();
+                if (p == null) {
+                    send(s, Fmt.PREFIX + " &cPlayers only.");
+                    return;
+                }
+                ItemContainerContents held = p.getMainHandItem().get(DataComponents.CONTAINER);
+                if (held == null) {
+                    send(s, Fmt.PREFIX + " &cHold a shulker box (or other container item) filled with the prize.");
+                    return;
+                }
+                List<ItemStack> items = new ArrayList<>();
+                for (ItemStack st : held.nonEmptyItemsCopy()) items.add(st);
+                if (items.isEmpty()) {
+                    send(s, Fmt.PREFIX + " &cThat container is empty.");
+                    return;
+                }
+                pool.sets.add(items);
+                plugin.points.save();
+                send(s, Fmt.PREFIX + " &aAdded " + label + " &e#" + pool.sets.size() + " &8(" + items.size() + " stacks)&a. Mode: &f" + pool.mode());
+            }
+            case "clear" -> {
+                pool.sets.clear();
+                plugin.points.save();
+                send(s, Fmt.PREFIX + " &aCleared every " + label + "&a.");
+            }
+            case "list" -> {
+                if (pool.sets.isEmpty()) {
+                    send(s, Fmt.PREFIX + " &7No " + label + " &7sets. Add one with &f/moneysmp point " + name + " add&7.");
+                    return;
+                }
+                send(s, Fmt.PREFIX + " &7" + (sup ? "Super prize" : "Prize") + " sets  &8|  &7Mode: &f" + pool.mode()
+                    + (plugin.points.running && !pool.random ? "  &8|  &7Next: &f#" + (pool.next + 1) : ""));
+                for (int i = 0; i < pool.sets.size(); i++) {
+                    StringBuilder sb = new StringBuilder();
+                    for (ItemStack st : pool.sets.get(i)) {
+                        if (sb.length() > 0) sb.append("&7, ");
+                        sb.append("&f").append(st.getCount()).append("x ").append(st.getHoverName().getString());
+                    }
+                    send(s, "  &e#" + (i + 1) + " &8»  " + sb);
+                }
+            }
+            case "mode" -> {
+                if (args.length < 4 || !(args[3].equalsIgnoreCase("once") || args[3].equalsIgnoreCase("random"))) {
+                    send(s, Fmt.PREFIX + " &cUsage: &f/moneysmp point " + name + " mode <once|random>");
+                    send(s, "  &7once &8= &7each set is handed out one time, in order.  &7random &8= &7any set can drop on any capture.");
+                    return;
+                }
+                pool.random = args[3].equalsIgnoreCase("random");
+                plugin.points.save();
+                send(s, Fmt.PREFIX + " &a" + (sup ? "Super prize" : "Prize") + " mode: &f" + pool.mode());
+            }
+            default -> send(s, Fmt.PREFIX + " &cUsage: &f/moneysmp point " + name + " add &8| &fclear &8| &flist &8| &fmode <once|random>");
+        }
+    }
+
     private static Integer pointNumber(String s) {
         try {
             int n = Integer.parseInt(s);
@@ -1091,8 +1142,13 @@ final class Commands {
                     send(s, Fmt.PREFIX + " " + why);
                     return;
                 }
-                if (cp.loot.isEmpty()) send(s, Fmt.PREFIX + " &eNo prize set. Captures will only pay points and money. &7(/moneysmp point loot)");
-                if (!cp.superPoints.isEmpty() && cp.superLoot.isEmpty()) send(s, Fmt.PREFIX + " &eNo super prize set. &7(/moneysmp point superloot)");
+                int normal = cp.points.size() - cp.superPoints.size();
+                if (cp.loot.sets.isEmpty()) send(s, Fmt.PREFIX + " &eNo prize set. Captures will only pay points and money. &7(/moneysmp point loot add)");
+                else if (!cp.loot.random && cp.loot.sets.size() < normal) send(s, Fmt.PREFIX + " &eOnly &f" + cp.loot.sets.size() + " &eprize sets for &f" + normal + " &enormal points; the rest drop nothing.");
+                if (!cp.superPoints.isEmpty()) {
+                    if (cp.superLoot.sets.isEmpty()) send(s, Fmt.PREFIX + " &eNo super prize set. &7(/moneysmp point superloot add)");
+                    else if (!cp.superLoot.random && cp.superLoot.sets.size() < cp.superPoints.size()) send(s, Fmt.PREFIX + " &eOnly &f" + cp.superLoot.sets.size() + " &esuper prize sets for &f" + cp.superPoints.size() + " &esuper points; the rest drop nothing.");
+                }
             }
             case "stop" -> {
                 if (!cp.running) send(s, Fmt.PREFIX + " &cNo control point event is running.");

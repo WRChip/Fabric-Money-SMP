@@ -2,7 +2,7 @@ plugins {
     id 'fabric-loom' version '1.17.20'
 }
 
-version = '1.2.0'
+version = '1.2.1'
 group = 'dev.flame'
 base.archivesName = 'MoneySMP-fabric'
 
