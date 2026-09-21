@@ -141,8 +141,8 @@ public final class Unlockout {
     private long total;
     final Map<Integer, List<String>> done = new HashMap<>();
     final Map<Integer, List<String>> linesDone = new HashMap<>();
-    // points earned in this event. they also go on the shared team tally, but that one
-    // carries over from earlier events and control points so it isn't what we display
+    // points earned in this event. deliberately not the shared team tally: nothing carries
+    // over between events
     final Map<String, Integer> score = new HashMap<>();
     private final Map<String, Map<Integer, Progress>> progress = new HashMap<>();
     // sneak base, sneak last, sprint base, sprint last, all in cm. base -1 until first seen
@@ -324,8 +324,7 @@ public final class Unlockout {
         broadcast("");
         broadcast(Fmt.PREFIX + " " + reason);
         for (Map.Entry<String, Integer> e : standings()) {
-            broadcast("  " + Teams.color(e.getKey()) + "&l" + e.getKey() + "  &e" + e.getValue() + " pts  &8(" + doneCount(e.getKey()) + "/" + GOALS.size()
-                + " goals, tally " + plugin.data.teamPoints.getOrDefault(e.getKey(), 0) + ")");
+            broadcast("  " + Teams.color(e.getKey()) + "&l" + e.getKey() + "  &e" + e.getValue() + " pts  &8(" + doneCount(e.getKey()) + "/" + GOALS.size() + " goals)");
         }
         broadcast("");
     }
@@ -339,9 +338,7 @@ public final class Unlockout {
         return out;
     }
 
-    // event score after the award; the shared tally gets it too
     private int award(String team, int pts) {
-        plugin.data.teamPoints.merge(team, pts, Integer::sum);
         return score.merge(team, pts, Integer::sum);
     }
 

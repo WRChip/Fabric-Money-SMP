@@ -135,7 +135,9 @@ final class Commands {
             .then(point)
             .then(literal("unlockout").executes(c.exec("unlockout"))
                 .then(literal("list").executes(c.exec("unlockout list")))
-                .then(literal("map").executes(c.exec("unlockout map"))))
+                .then(literal("map").executes(c.exec("unlockout map")))
+                .then(literal("start").executes(c.exec("unlockout start")))
+                .then(literal("stop").executes(c.exec("unlockout stop"))))
             .then(literal("event").requires(admin).executes(c.exec("event"))
                 .then(literal("control-point").executes(c.exec("event control-point"))
                     .then(literal("start").executes(c.exec("event control-point start")))
@@ -170,7 +172,9 @@ final class Commands {
         d.register(literal("unlockout")
             .executes(ctx -> c.unlockout(ctx.getSource(), ""))
             .then(literal("list").executes(ctx -> c.unlockout(ctx.getSource(), "list")))
-            .then(literal("map").executes(ctx -> c.unlockout(ctx.getSource(), "map"))));
+            .then(literal("map").executes(ctx -> c.unlockout(ctx.getSource(), "map")))
+            .then(literal("start").executes(ctx -> c.unlockout(ctx.getSource(), "start")))
+            .then(literal("stop").executes(ctx -> c.unlockout(ctx.getSource(), "stop"))));
 
         for (String name : new String[]{"balance", "bal"}) {
             d.register(literal(name)
@@ -1148,6 +1152,11 @@ final class Commands {
 
     private int unlockout(CommandSourceStack s, String sub) {
         Unlockout u = plugin.unlockout;
+        // the admin commands live under event; point people there instead of a brigadier error
+        if (sub.equals("start") || sub.equals("stop")) {
+            send(s, Fmt.PREFIX + " &cThat's &f/moneysmp event unlockout " + sub + (sub.equals("start") ? " [time]" : "") + "&c.");
+            return 0;
+        }
         if (!u.running) {
             send(s, Fmt.PREFIX + " &7No unlockout event is running.");
             return 0;
