@@ -141,6 +141,9 @@ public final class Unlockout {
     private long total;
     final Map<Integer, List<String>> done = new HashMap<>();
     final Map<Integer, List<String>> linesDone = new HashMap<>();
+    // points earned in this event. they also go on the shared team tally, but that one
+    // carries over from earlier events and control points so it isn't what we display
+    final Map<String, Integer> score = new HashMap<>();
     private final Map<String, Map<Integer, Progress>> progress = new HashMap<>();
     // sneak base, sneak last, sprint base, sprint last, all in cm. base -1 until first seen
     private final Map<UUID, long[]> stats = new HashMap<>();
@@ -181,6 +184,9 @@ public final class Unlockout {
             total = y.has("total") ? y.get("total").getAsLong() : 0;
             readOrder(y.getAsJsonObject("done"), done);
             readOrder(y.getAsJsonObject("lines"), linesDone);
+            for (Map.Entry<String, JsonElement> e : y.getAsJsonObject("score").entrySet()) {
+                score.put(e.getKey(), e.getValue().getAsInt());
+            }
             for (Map.Entry<String, JsonElement> e : y.getAsJsonObject("maps").entrySet()) {
                 maps.put(e.getKey(), new MapId(e.getValue().getAsInt()));
             }
@@ -212,6 +218,7 @@ public final class Unlockout {
         total = 0;
         done.clear();
         linesDone.clear();
+        score.clear();
         progress.clear();
         stats.clear();
         maps.clear();
@@ -233,6 +240,9 @@ public final class Unlockout {
             y.addProperty("total", total);
             y.add("done", order(done));
             y.add("lines", order(linesDone));
+            JsonObject sc = new JsonObject();
+            score.forEach(sc::addProperty);
+            y.add("score", sc);
             JsonObject ms = new JsonObject();
             maps.forEach((t, id) -> ms.addProperty(t, id.id()));
             y.add("maps", ms);
@@ -314,7 +324,8 @@ public final class Unlockout {
         broadcast("");
         broadcast(Fmt.PREFIX + " " + reason);
         for (Map.Entry<String, Integer> e : standings()) {
-            broadcast("  " + Teams.color(e.getKey()) + "&l" + e.getKey() + "  &e" + e.getValue() + " pts  &8(" + doneCount(e.getKey()) + "/" + GOALS.size() + " goals)");
+            broadcast("  " + Teams.color(e.getKey()) + "&l" + e.getKey() + "  &e" + e.getValue() + " pts  &8(" + doneCount(e.getKey()) + "/" + GOALS.size()
+                + " goals, tally " + plugin.data.teamPoints.getOrDefault(e.getKey(), 0) + ")");
         }
         broadcast("");
     }
@@ -322,10 +333,16 @@ public final class Unlockout {
     private List<Map.Entry<String, Integer>> standings() {
         List<Map.Entry<String, Integer>> out = new ArrayList<>();
         for (String t : Teams.active(plugin.data.teamCount, plugin.data.disabledTeams)) {
-            out.add(Map.entry(t, plugin.data.teamPoints.getOrDefault(t, 0)));
+            out.add(Map.entry(t, score.getOrDefault(t, 0)));
         }
         out.sort((a, b) -> b.getValue() - a.getValue());
         return out;
+    }
+
+    // event score after the award; the shared tally gets it too
+    private int award(String team, int pts) {
+        plugin.data.teamPoints.merge(team, pts, Integer::sum);
+        return score.merge(team, pts, Integer::sum);
     }
 
     void join(ServerPlayer p) {
@@ -471,7 +488,7 @@ public final class Unlockout {
         List<String> order = done.computeIfAbsent(g, k -> new ArrayList<>());
         order.add(team);
         int pts = Math.max(0, GOAL_POINTS - (order.size() - 1));
-        int now = plugin.data.teamPoints.merge(team, pts, Integer::sum);
+        int now = award(team, pts);
         String col = Teams.color(team);
         broadcast(Fmt.PREFIX + " " + col + "&l" + team + " &acompleted &f" + GOALS.get(g).name() + "&a!  &e+" + pts + " pts &8("
             + ordinal(order.size()) + " team)  &7» &e" + now + " pts");
@@ -484,13 +501,13 @@ public final class Unlockout {
             List<String> lo = linesDone.computeIfAbsent(l, k -> new ArrayList<>());
             lo.add(team);
             int lp = Math.max(0, LINE_POINTS - LINE_STEP * (lo.size() - 1));
-            now = plugin.data.teamPoints.merge(team, lp, Integer::sum);
+            now = award(team, lp);
             broadcast("");
             broadcast(Fmt.PREFIX + " " + col + "&l" + team + " &afinished " + lineName(l) + "&a!  &e+" + lp + " pts &8(" + ordinal(lo.size()) + " team)  &7» &e" + now + " pts");
             broadcast("");
         }
         if (doneCount(team) == GOALS.size()) {
-            now = plugin.data.teamPoints.merge(team, BOARD_POINTS, Integer::sum);
+            now = award(team, BOARD_POINTS);
             broadcast("");
             broadcast(Fmt.PREFIX + " " + col + "&l" + team + " &a&lcompleted the entire board!  &e+" + BOARD_POINTS + " pts  &7» &e" + now + " pts");
             end(col + "&l" + team + " &acleared the board!");
