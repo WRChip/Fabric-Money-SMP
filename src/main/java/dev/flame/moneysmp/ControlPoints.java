@@ -1,0 +1,460 @@
+package dev.flame.moneysmp;
+
+import com.google.gson.Gson;
+import com.google.gson.GsonBuilder;
+import com.google.gson.JsonArray;
+import com.google.gson.JsonElement;
+import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
+import com.mojang.brigadier.exceptions.CommandSyntaxException;
+import com.mojang.serialization.JsonOps;
+import net.minecraft.commands.arguments.blocks.BlockStateParser;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.particles.DustParticleOptions;
+import net.minecraft.core.registries.Registries;
+import net.minecraft.network.protocol.game.ClientboundTrackedWaypointPacket;
+import net.minecraft.resources.Identifier;
+import net.minecraft.resources.RegistryOps;
+import net.minecraft.resources.ResourceKey;
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.entity.ai.attributes.AttributeInstance;
+import net.minecraft.world.entity.ai.attributes.Attributes;
+import net.minecraft.world.entity.item.ItemEntity;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.level.Level;
+import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.waypoints.Waypoint;
+
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.Set;
+import java.util.TreeMap;
+import java.util.UUID;
+import java.util.concurrent.ThreadLocalRandom;
+
+// KOTH-style capture points. /moneysmp point <n> marks one where the admin stands; the
+// control-point event drops a beacon on each, puts them on the locator bar and pays out to
+// the team that holds one long enough. ticked once a second by MoneySMP while running
+final class ControlPoints {
+    static final int RADIUS = 5;
+    // one player earns their team 5% every 30s. super points take four times as long
+    private static final double RATE = 5.0 / 30;
+    private static final int SUPER_SLOWDOWN = 4;
+    private static final int GRAY = 0x9D9D97;
+    private static final int NETHERITE = 0x4D494D;
+    private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
+
+    record Point(ResourceKey<Level> dim, BlockPos pos) {}
+    private record Placed(ResourceKey<Level> dim, BlockPos pos, BlockState state) {}
+
+    private final MoneySMP plugin;
+    private Path file;
+    final Map<Integer, Point> points = new TreeMap<>();
+    final List<ItemStack> loot = new ArrayList<>();
+    final List<ItemStack> superLoot = new ArrayList<>();
+
+    boolean running;
+    final Set<Integer> superPoints = new HashSet<>();
+    final Map<Integer, String> owner = new HashMap<>();
+    private final Map<Integer, Map<String, Double>> progress = new HashMap<>();
+    // what the beacon platforms replaced, put back when the event ends. persisted with the
+    // rest of the event so a crash mid-event resumes instead of stranding beacons
+    private final List<Placed> placed = new ArrayList<>();
+    private int phase;
+
+    ControlPoints(MoneySMP plugin) {
+        this.plugin = plugin;
+    }
+
+    private void broadcast(String msg) {
+        plugin.server.getPlayerList().broadcastSystemMessage(Fmt.c(msg), false);
+    }
+
+    private List<ServerPlayer> players() {
+        return plugin.server.getPlayerList().getPlayers();
+    }
+
+    private RegistryOps<JsonElement> ops() {
+        return RegistryOps.create(JsonOps.INSTANCE, plugin.server.registryAccess());
+    }
+
+    // ── points.json ──────────────────────────────────────────────
+
+    void load(Path dir) {
+        file = dir.resolve("points.json");
+        points.clear();
+        loot.clear();
+        superLoot.clear();
+        superPoints.clear();
+        owner.clear();
+        progress.clear();
+        placed.clear();
+        running = false;
+        if (!Files.exists(file)) return;
+        try {
+            JsonObject y = JsonParser.parseString(Files.readString(file)).getAsJsonObject();
+            if (y.has("points")) {
+                for (Map.Entry<String, JsonElement> e : y.getAsJsonObject("points").entrySet()) {
+                    JsonObject o = e.getValue().getAsJsonObject();
+                    points.put(Integer.parseInt(e.getKey()), new Point(dim(o), pos(o)));
+                }
+            }
+            readItems(y, "loot", loot);
+            readItems(y, "superloot", superLoot);
+            if (y.has("event")) {
+                JsonObject ev = y.getAsJsonObject("event");
+                for (JsonElement el : ev.getAsJsonArray("super")) superPoints.add(el.getAsInt());
+                for (Map.Entry<String, JsonElement> e : ev.getAsJsonObject("owner").entrySet()) {
+                    owner.put(Integer.parseInt(e.getKey()), e.getValue().getAsString());
+                }
+                var blocks = plugin.server.registryAccess().lookupOrThrow(Registries.BLOCK);
+                for (JsonElement el : ev.getAsJsonArray("placed")) {
+                    JsonObject o = el.getAsJsonObject();
+                    BlockState state = BlockStateParser.parseForBlock(blocks, o.get("state").getAsString(), false).blockState();
+                    placed.add(new Placed(dim(o), pos(o), state));
+                }
+                running = true;
+                MoneySMP.LOG.info("resuming control point event: {} of {} points captured", owner.size(), points.size());
+            }
+        } catch (IOException | RuntimeException | CommandSyntaxException e) {
+            MoneySMP.LOG.error("could not read points.json", e);
+        }
+    }
+
+    void save() {
+        JsonObject y = new JsonObject();
+        JsonObject ps = new JsonObject();
+        points.forEach((n, pt) -> {
+            JsonObject o = new JsonObject();
+            put(o, pt.dim(), pt.pos());
+            ps.add(String.valueOf(n), o);
+        });
+        y.add("points", ps);
+        y.add("loot", items(loot));
+        y.add("superloot", items(superLoot));
+        if (running) {
+            JsonObject ev = new JsonObject();
+            JsonArray sup = new JsonArray();
+            for (int n : superPoints) sup.add(n);
+            ev.add("super", sup);
+            JsonObject own = new JsonObject();
+            owner.forEach((n, t) -> own.addProperty(String.valueOf(n), t));
+            ev.add("owner", own);
+            JsonArray pl = new JsonArray();
+            for (Placed p : placed) {
+                JsonObject o = new JsonObject();
+                put(o, p.dim(), p.pos());
+                o.addProperty("state", BlockStateParser.serialize(p.state()));
+                pl.add(o);
+            }
+            ev.add("placed", pl);
+            y.add("event", ev);
+        }
+        try {
+            Files.createDirectories(file.getParent());
+            Files.writeString(file, GSON.toJson(y));
+        } catch (IOException e) {
+            MoneySMP.LOG.error("could not write points.json", e);
+        }
+    }
+
+    private JsonArray items(List<ItemStack> list) {
+        JsonArray arr = new JsonArray();
+        for (ItemStack st : list) {
+            ItemStack.CODEC.encodeStart(ops(), st)
+                .resultOrPartial(err -> MoneySMP.LOG.warn("points.json: could not save item: {}", err))
+                .ifPresent(arr::add);
+        }
+        return arr;
+    }
+
+    private void readItems(JsonObject y, String key, List<ItemStack> into) {
+        if (!y.has(key)) return;
+        for (JsonElement el : y.getAsJsonArray(key)) {
+            ItemStack.CODEC.parse(ops(), el)
+                .resultOrPartial(err -> MoneySMP.LOG.warn("points.json: dropping item in {}: {}", key, err))
+                .ifPresent(into::add);
+        }
+    }
+
+    private static void put(JsonObject o, ResourceKey<Level> dim, BlockPos pos) {
+        o.addProperty("dim", dim.identifier().toString());
+        o.addProperty("x", pos.getX());
+        o.addProperty("y", pos.getY());
+        o.addProperty("z", pos.getZ());
+    }
+
+    private static ResourceKey<Level> dim(JsonObject o) {
+        return ResourceKey.create(Registries.DIMENSION, Identifier.parse(o.get("dim").getAsString()));
+    }
+
+    private static BlockPos pos(JsonObject o) {
+        return new BlockPos(o.get("x").getAsInt(), o.get("y").getAsInt(), o.get("z").getAsInt());
+    }
+
+    // ── setup ────────────────────────────────────────────────────
+
+    void set(int n, ServerPlayer p) {
+        points.put(n, new Point(p.level().dimension(), p.blockPosition()));
+        save();
+    }
+
+    boolean remove(int n) {
+        if (points.remove(n) == null) return false;
+        save();
+        return true;
+    }
+
+    void setLoot(boolean sup, List<ItemStack> items) {
+        List<ItemStack> pool = sup ? superLoot : loot;
+        pool.clear();
+        pool.addAll(items);
+        save();
+    }
+
+    // players never show on the locator bar; only control points do
+    static void hideFromLocator(ServerPlayer p) {
+        AttributeInstance a = p.getAttribute(Attributes.WAYPOINT_TRANSMIT_RANGE);
+        if (a != null) a.setBaseValue(0);
+        p.level().getWaypointManager().untrackWaypoint(p);
+    }
+
+    // ── event ────────────────────────────────────────────────────
+
+    // null when the event began, otherwise why it couldn't
+    String start() {
+        if (running) return "&cA control point event is already running.";
+        if (points.isEmpty()) return "&cNo control points set. Use &f/moneysmp point <number> &cfirst.";
+        for (Map.Entry<Integer, Point> e : points.entrySet()) {
+            if (plugin.server.getLevel(e.getValue().dim()) == null) {
+                return "&cPoint &f#" + e.getKey() + " &cis in a dimension that no longer exists. Remove or re-set it.";
+            }
+        }
+        superPoints.clear();
+        owner.clear();
+        progress.clear();
+        placed.clear();
+        List<Integer> ids = new ArrayList<>(points.keySet());
+        Collections.shuffle(ids);
+        for (int i = 0; i < Math.round(ids.size() / 4.0); i++) superPoints.add(ids.get(i));
+        for (Map.Entry<Integer, Point> e : points.entrySet()) {
+            Block glass = superPoints.contains(e.getKey()) ? Blocks.GRAY_STAINED_GLASS : Blocks.LIGHT_GRAY_STAINED_GLASS;
+            place(plugin.server.getLevel(e.getValue().dim()), e.getValue().pos(), glass);
+        }
+        running = true;
+        save();
+
+        broadcast("");
+        broadcast(Fmt.PREFIX + " &a&l⚑ CONTROL POINT EVENT STARTED ⚑");
+        broadcast("  &7Stand inside a ring to capture it for your team. Follow the locator bar!");
+        for (Map.Entry<Integer, Point> e : points.entrySet()) {
+            BlockPos c = e.getValue().pos();
+            broadcast("  &7#" + e.getKey() + " &8(" + c.getX() + ", " + c.getY() + ", " + c.getZ() + ")"
+                + (superPoints.contains(e.getKey()) ? "  &8&l✦ SUPER" : ""));
+        }
+        broadcast("");
+        for (ServerPlayer p : players()) sendWaypoints(p);
+        return null;
+    }
+
+    void stop() {
+        end("&7The control point event was stopped.");
+    }
+
+    private void end(String reason) {
+        running = false;
+        for (Placed p : placed) {
+            ServerLevel level = plugin.server.getLevel(p.dim());
+            if (level != null) level.setBlockAndUpdate(p.pos(), p.state());
+        }
+        placed.clear();
+        progress.clear();
+        save();
+        broadcast("");
+        broadcast(Fmt.PREFIX + " " + reason);
+        List<Map.Entry<String, Integer>> standings = new ArrayList<>(plugin.data.teamPoints.entrySet());
+        standings.sort((a, b) -> b.getValue() - a.getValue());
+        for (Map.Entry<String, Integer> e : standings) {
+            if (e.getValue() > 0) broadcast("  " + Teams.color(e.getKey()) + "&l" + e.getKey() + "  &e" + e.getValue() + " pts");
+        }
+        broadcast("");
+        for (ServerPlayer p : players()) clearWaypoints(p);
+    }
+
+    // beacon under the block the admin stood on, iron under that, glass on top for the colour
+    private void place(ServerLevel level, BlockPos c, Block glass) {
+        BlockPos beacon = c.below();
+        for (int dx = -1; dx <= 1; dx++) {
+            for (int dz = -1; dz <= 1; dz++) put(level, beacon.below().offset(dx, 0, dz), Blocks.IRON_BLOCK);
+        }
+        put(level, beacon, Blocks.BEACON);
+        put(level, c, glass);
+    }
+
+    private void put(ServerLevel level, BlockPos pos, Block block) {
+        placed.add(new Placed(level.dimension(), pos, level.getBlockState(pos)));
+        level.setBlockAndUpdate(pos, block.defaultBlockState());
+    }
+
+    void tick() {
+        if (!running) return;
+        phase++;
+        for (Map.Entry<Integer, Point> e : points.entrySet()) {
+            int n = e.getKey();
+            Point pt = e.getValue();
+            ServerLevel level = plugin.server.getLevel(pt.dim());
+            if (level == null) continue;
+            String held = owner.get(n);
+            boolean sup = superPoints.contains(n);
+            ring(level, pt.pos(), held != null ? Teams.rgb(held) : sup ? NETHERITE : GRAY);
+            if (held != null) continue;
+
+            Map<String, Integer> present = new HashMap<>();
+            List<ServerPlayer> inside = new ArrayList<>();
+            for (ServerPlayer p : level.players()) {
+                if (p.isSpectator() || !inRing(p, pt.pos())) continue;
+                inside.add(p);
+                String team = plugin.data.team(p.getUUID());
+                if (team != null) present.merge(team, 1, Integer::sum);
+            }
+            String top = null;
+            int topCount = 0;
+            int second = 0;
+            for (Map.Entry<String, Integer> pe : present.entrySet()) {
+                if (pe.getValue() > topCount) {
+                    second = topCount;
+                    topCount = pe.getValue();
+                    top = pe.getKey();
+                } else if (pe.getValue() > second) {
+                    second = pe.getValue();
+                }
+            }
+            Map<String, Double> prog = progress.computeIfAbsent(n, k -> new HashMap<>());
+            // a contested point only moves for the bigger team, at the pace of its extra players
+            if (top != null && topCount > second) {
+                double gain = (topCount - second) * RATE / (sup ? SUPER_SLOWDOWN : 1);
+                if (prog.merge(top, gain, Double::sum) >= 100) {
+                    if (capture(n, top)) return;
+                    continue;
+                }
+            }
+            if (!inside.isEmpty()) {
+                String msg = status(n, sup, prog, top != null && topCount == second);
+                for (ServerPlayer p : inside) plugin.notify(p.getUUID(), msg, 2);
+            }
+        }
+    }
+
+    private static boolean inRing(ServerPlayer p, BlockPos c) {
+        double dx = p.getX() - (c.getX() + 0.5);
+        double dz = p.getZ() - (c.getZ() + 0.5);
+        double dy = p.getY() - c.getY();
+        return dx * dx + dz * dz <= RADIUS * RADIUS && dy >= -2 && dy <= 4;
+    }
+
+    private static String status(int n, boolean sup, Map<String, Double> prog, boolean contested) {
+        StringBuilder sb = new StringBuilder(sup ? "&8&l✦ &7Super point &f#" : "&7Point &f#").append(n);
+        prog.entrySet().stream()
+            .sorted((a, b) -> Double.compare(b.getValue(), a.getValue()))
+            .forEach(e -> sb.append("  ").append(Teams.color(e.getKey())).append(e.getKey())
+                .append(" &f").append((int) Math.floor(e.getValue())).append('%'));
+        if (contested) sb.append("  &c&lCONTESTED");
+        return sb.toString();
+    }
+
+    private void ring(ServerLevel level, BlockPos c, int color) {
+        DustParticleOptions dust = new DustParticleOptions(color, 1.2f);
+        double cx = c.getX() + 0.5;
+        double cz = c.getZ() + 0.5;
+        double y = c.getY() + 0.3;
+        for (int i = 0; i < 16; i++) {
+            double a = (i + phase * 0.37) * Math.PI * 2 / 16;
+            level.sendParticles(dust, cx + Math.cos(a) * RADIUS, y, cz + Math.sin(a) * RADIUS, 1, 0, 0, 0, 0);
+        }
+    }
+
+    // true when this was the last point and the event is over
+    private boolean capture(int n, String team) {
+        Point pt = points.get(n);
+        ServerLevel level = plugin.server.getLevel(pt.dim());
+        boolean sup = superPoints.contains(n);
+        owner.put(n, team);
+        progress.remove(n);
+        level.setBlockAndUpdate(pt.pos(), Teams.glass(team).defaultBlockState());
+
+        Config cfg = plugin.config;
+        int total = plugin.data.teamPoints.merge(team, cfg.controlPointPoints, Integer::sum);
+        for (Map.Entry<UUID, Data.PlayerData> e : plugin.data.players.entrySet()) {
+            Data.PlayerData pd = e.getValue();
+            if (!team.equals(pd.team)) continue;
+            pd.money += cfg.controlPointMoney;
+            plugin.data.log("POINT", "CONTROL POINT #" + n, pd.name, cfg.controlPointMoney, "Captured control point");
+            if (plugin.server.getPlayerList().getPlayer(e.getKey()) != null) {
+                plugin.notify(e.getKey(), "&a&l+ $" + Fmt.money(cfg.controlPointMoney) + "  &7Point #" + n + " captured!  &8|  &a$ &e" + Fmt.money(pd.money), 6);
+            }
+        }
+        drop(level, pt.pos(), sup ? superLoot : loot);
+
+        String col = Teams.color(team);
+        broadcast("");
+        broadcast(Fmt.PREFIX + " " + col + "&l" + team + " &acaptured " + (sup ? "&8&l✦ super " : "") + "&acontrol point &f#" + n + "&a!");
+        broadcast("  &7+" + cfg.controlPointPoints + " pts  &8|  &7+$" + Fmt.money(cfg.controlPointMoney) + " per member  &8|  " + col + team + " &7now has &e" + total + " pts");
+        broadcast("");
+        save();
+        for (ServerPlayer p : players()) sendWaypoints(p);
+        if (owner.size() < points.size()) return false;
+        end("&a&lAll control points have been captured!");
+        return true;
+    }
+
+    private static void drop(ServerLevel level, BlockPos c, List<ItemStack> pool) {
+        ThreadLocalRandom rnd = ThreadLocalRandom.current();
+        for (ItemStack st : pool) {
+            double a = rnd.nextDouble() * Math.PI * 2;
+            double r = rnd.nextDouble() * 2.5;
+            ItemEntity item = new ItemEntity(level, c.getX() + 0.5 + Math.cos(a) * r, c.getY() + 1.5, c.getZ() + 0.5 + Math.sin(a) * r,
+                st.copy(), rnd.nextDouble(-0.1, 0.1), 0.2, rnd.nextDouble(-0.1, 0.1));
+            item.setDefaultPickUpDelay();
+            level.addFreshEntity(item);
+        }
+    }
+
+    // ── locator bar ──────────────────────────────────────────────
+
+    private static UUID waypointId(int n) {
+        return UUID.nameUUIDFromBytes(("moneysmp-point-" + n).getBytes(StandardCharsets.UTF_8));
+    }
+
+    // uncaptured points are grey (netherite for super), captured ones take the team colour.
+    // the client shows the bar whenever it has any waypoint, so this alone turns it on
+    void sendWaypoints(ServerPlayer p) {
+        if (!running) return;
+        for (Map.Entry<Integer, Point> e : points.entrySet()) {
+            int n = e.getKey();
+            if (!p.level().dimension().equals(e.getValue().dim())) {
+                p.connection.send(ClientboundTrackedWaypointPacket.removeWaypoint(waypointId(n)));
+                continue;
+            }
+            String held = owner.get(n);
+            Waypoint.Icon icon = new Waypoint.Icon();
+            icon.color = Optional.of(held != null ? Teams.rgb(held) : superPoints.contains(n) ? NETHERITE : GRAY);
+            p.connection.send(ClientboundTrackedWaypointPacket.addWaypointPosition(waypointId(n), icon, e.getValue().pos()));
+        }
+    }
+
+    private void clearWaypoints(ServerPlayer p) {
+        for (int n : points.keySet()) p.connection.send(ClientboundTrackedWaypointPacket.removeWaypoint(waypointId(n)));
+    }
+}

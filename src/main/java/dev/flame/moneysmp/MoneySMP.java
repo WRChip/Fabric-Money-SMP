@@ -2,7 +2,9 @@ package dev.flame.moneysmp;
 
 import net.fabricmc.api.ModInitializer;
 import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback;
+import net.fabricmc.fabric.api.entity.event.v1.ServerEntityWorldChangeEvents;
 import net.fabricmc.fabric.api.entity.event.v1.ServerLivingEntityEvents;
+import net.fabricmc.fabric.api.entity.event.v1.ServerPlayerEvents;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayConnectionEvents;
@@ -39,6 +41,7 @@ public final class MoneySMP implements ModInitializer {
     Data data;
     Config config;
     final Auction auction = new Auction(this);
+    final ControlPoints points = new ControlPoints(this);
     private int tick;
 
     @Override
@@ -50,6 +53,7 @@ public final class MoneySMP implements ModInitializer {
             config = Config.load(dir);
             data = new Data(dir, s);
             data.load();
+            points.load(dir);
             Teams.setup(s);
             for (ServerPlayer p : s.getPlayerList().getPlayers()) sync(p);
         });
@@ -68,9 +72,17 @@ public final class MoneySMP implements ModInitializer {
         ServerLivingEntityEvents.AFTER_DEATH.register((entity, source) -> {
             if (entity instanceof ServerPlayer victim) onDeath(victim);
         });
+        // the client keeps its waypoints across respawns and dimension changes, so resend
+        // (or clear) ours whenever vanilla would have resent the player ones
+        ServerPlayerEvents.AFTER_RESPAWN.register((old, p, alive) -> {
+            ControlPoints.hideFromLocator(p);
+            points.sendWaypoints(p);
+        });
+        ServerEntityWorldChangeEvents.AFTER_PLAYER_CHANGE_WORLD.register((p, from, to) -> points.sendWaypoints(p));
         ServerTickEvents.END_SERVER_TICK.register(s -> {
             tick++;
             if (tick % 20 == 0) {
+                points.tick();
                 actionBarTick();
                 auction.tick();
             }
@@ -92,6 +104,8 @@ public final class MoneySMP implements ModInitializer {
     private void onJoin(ServerPlayer p) {
         data.get(p);
         sync(p);
+        ControlPoints.hideFromLocator(p);
+        points.sendWaypoints(p);
     }
 
     // PvP only: attacker +$20, victim -$20. Mob kills give nothing.

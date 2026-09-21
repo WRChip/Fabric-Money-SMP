@@ -18,6 +18,9 @@ final class Config {
     double minBidIncrease = 5;
     int bidSeconds = 20;
     final Map<String, Double> tierMinimum = new LinkedHashMap<>();
+    // per captured control point: team points, and money for every member of the team
+    int controlPointPoints = 10;
+    double controlPointMoney = 100;
 
     Config() {
         double[] mins = {100, 70, 50, 40, 35, 30, 30};
@@ -44,6 +47,8 @@ final class Config {
                 JsonObject m = y.getAsJsonObject("tierMinimum");
                 for (String t : Tiers.NAMES) if (m.has(t)) c.tierMinimum.put(t, m.get(t).getAsDouble());
             }
+            if (y.has("controlPointPoints")) c.controlPointPoints = y.get("controlPointPoints").getAsInt();
+            if (y.has("controlPointMoney")) c.controlPointMoney = y.get("controlPointMoney").getAsDouble();
         } catch (IOException | RuntimeException e) {
             MoneySMP.LOG.error("could not read config.json, using defaults", e);
         }

@@ -5,6 +5,8 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.ServerScoreboard;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.scores.PlayerTeam;
 import net.minecraft.world.scores.Team;
 
@@ -38,6 +40,26 @@ final class Teams {
             case "Aqua" -> "&b";
             case "Pink" -> "&d";
             default -> "&7";
+        };
+    }
+
+    static int rgb(String team) {
+        return MC_COLORS[NAMES.indexOf(team)].getColor();
+    }
+
+    // stained glass whose beacon beam is closest to the team's chat colour
+    static Block glass(String team) {
+        return switch (team) {
+            case "Red" -> Blocks.RED_STAINED_GLASS;
+            case "Blue" -> Blocks.BLUE_STAINED_GLASS;
+            case "Purple" -> Blocks.PURPLE_STAINED_GLASS;
+            case "Green" -> Blocks.LIME_STAINED_GLASS;
+            case "White" -> Blocks.WHITE_STAINED_GLASS;
+            case "Gold" -> Blocks.ORANGE_STAINED_GLASS;
+            case "Yellow" -> Blocks.YELLOW_STAINED_GLASS;
+            case "Aqua" -> Blocks.LIGHT_BLUE_STAINED_GLASS;
+            case "Pink" -> Blocks.MAGENTA_STAINED_GLASS;
+            default -> Blocks.LIGHT_GRAY_STAINED_GLASS;
         };
     }
 

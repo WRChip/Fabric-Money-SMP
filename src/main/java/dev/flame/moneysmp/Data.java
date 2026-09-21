@@ -50,6 +50,8 @@ final class Data {
     // one designated bidder per team: whoever was assigned to it first. only they can bid,
     // and everyone else on a team or tier gets zeroed out when the auction starts
     final Map<String, UUID> teamLeaders = new HashMap<>();
+    // running tally from control point captures
+    final Map<String, Integer> teamPoints = new HashMap<>();
 
     private final Path file;
     private final MinecraftServer server;
@@ -60,7 +62,8 @@ final class Data {
     boolean readOnly;
 
     private record Snapshot(int teamCount, boolean teamCountSet, Integer teamMax, Set<String> disabledTeams,
-                             Map<String, UUID> teamLeaders, Map<UUID, PlayerData> players, List<Tx> transactions) {}
+                             Map<String, UUID> teamLeaders, Map<String, Integer> teamPoints,
+                             Map<UUID, PlayerData> players, List<Tx> transactions) {}
 
     Data(Path dir, MinecraftServer server) {
         this.file = dir.resolve("data.json");
@@ -73,6 +76,7 @@ final class Data {
         transactions.clear();
         disabledTeams.clear();
         teamLeaders.clear();
+        teamPoints.clear();
         readOnly = false;
         if (!Files.exists(file)) {
             disabledTeams.addAll(Teams.DEFAULT_DISABLED);
@@ -86,6 +90,7 @@ final class Data {
             transactions.clear();
             disabledTeams.clear();
             teamLeaders.clear();
+            teamPoints.clear();
             readOnly = true;
             MoneySMP.LOG.error("could not read data.json; saving is disabled so it is not overwritten. fix or move the file and restart", e);
             return;
@@ -109,6 +114,12 @@ final class Data {
             for (Map.Entry<String, JsonElement> e : y.getAsJsonObject("teamleaders").entrySet()) {
                 String t = validTeam(e.getKey(), "teamleaders");
                 if (t != null) teamLeaders.put(t, UUID.fromString(e.getValue().getAsString()));
+            }
+        }
+        if (y.has("teampoints")) {
+            for (Map.Entry<String, JsonElement> e : y.getAsJsonObject("teampoints").entrySet()) {
+                String t = validTeam(e.getKey(), "teampoints");
+                if (t != null) teamPoints.put(t, e.getValue().getAsInt());
             }
         }
         if (y.has("players")) {
@@ -203,7 +214,7 @@ final class Data {
             copy.put(uid, saved);
         });
         return new Snapshot(teamCount, teamCountSet, teamMax, Set.copyOf(disabledTeams), Map.copyOf(teamLeaders),
-            copy, List.copyOf(transactions));
+            Map.copyOf(teamPoints), copy, List.copyOf(transactions));
     }
 
     private void write(Snapshot snapshot) {
@@ -222,6 +233,9 @@ final class Data {
                 out.endArray();
                 out.name("teamleaders").beginObject();
                 for (Map.Entry<String, UUID> e : snapshot.teamLeaders().entrySet()) out.name(e.getKey()).value(e.getValue().toString());
+                out.endObject();
+                out.name("teampoints").beginObject();
+                for (Map.Entry<String, Integer> e : snapshot.teamPoints().entrySet()) out.name(e.getKey()).value(e.getValue());
                 out.endObject();
                 out.name("players").beginObject();
                 for (Map.Entry<UUID, PlayerData> e : snapshot.players().entrySet()) {

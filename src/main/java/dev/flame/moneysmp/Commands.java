@@ -9,8 +9,11 @@ import com.mojang.brigadier.suggestion.SuggestionProvider;
 import me.lucko.fabric.api.permissions.v0.Permissions;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.SharedSuggestionProvider;
+import net.minecraft.core.component.DataComponents;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.server.permissions.PermissionLevel;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.component.ItemContainerContents;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -30,7 +33,7 @@ import static com.mojang.brigadier.arguments.StringArgumentType.word;
 final class Commands {
     private static final String LINE = "&8&m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━";
     private static final List<String> ADMIN_SUBS = List.of("give", "take", "set", "reset", "fine", "transaction",
-        "teambal", "teammax", "teamcount", "team", "randomteams", "tier", "auction", "post-auction");
+        "teambal", "teammax", "teamcount", "team", "randomteams", "tier", "auction", "post-auction", "point", "event");
     // reshaping teams or tiers under a live auction would leave it selling players that
     // moved or bidding for teams whose leader changed
     private static final Set<String> LOCKED_DURING_AUCTION = Set.of("reset", "randomteams", "tier", "team", "post-auction");
@@ -60,6 +63,11 @@ final class Commands {
         SuggestionProvider<CommandSourceStack> counts = (ctx, b) -> {
             List<String> nums = new ArrayList<>();
             for (int i = 1; i <= Teams.NAMES.size(); i++) nums.add(String.valueOf(i));
+            return SharedSuggestionProvider.suggest(nums, b);
+        };
+        SuggestionProvider<CommandSourceStack> pointNums = (ctx, b) -> {
+            List<String> nums = new ArrayList<>();
+            for (int n : plugin.points.points.keySet()) nums.add(String.valueOf(n));
             return SharedSuggestionProvider.suggest(nums, b);
         };
         Predicate<CommandSourceStack> admin = src -> Permissions.check(src, "moneysmp.admin", PermissionLevel.GAMEMASTERS);
@@ -108,7 +116,18 @@ final class Commands {
                 .then(literal("disable").executes(c.exec("team disable"))
                     .then(argument("team", word()).suggests(allTeams).executes(c.exec("team disable", "team"))))
                 .then(literal("leader").executes(c.exec("team leader"))
-                    .then(argument("player", word()).suggests(players).executes(c.exec("team leader", "player")))));
+                    .then(argument("player", word()).suggests(players).executes(c.exec("team leader", "player")))))
+            .then(literal("point").requires(admin).executes(c.exec("point"))
+                .then(literal("list").executes(c.exec("point list")))
+                .then(literal("loot").executes(c.exec("point loot")))
+                .then(literal("superloot").executes(c.exec("point superloot")))
+                .then(literal("remove").executes(c.exec("point remove"))
+                    .then(argument("number", word()).suggests(pointNums).executes(c.exec("point remove", "number"))))
+                .then(argument("number", word()).executes(c.exec("point", "number"))))
+            .then(literal("event").requires(admin).executes(c.exec("event"))
+                .then(literal("control-point").executes(c.exec("event control-point"))
+                    .then(literal("start").executes(c.exec("event control-point start")))
+                    .then(literal("stop").executes(c.exec("event control-point stop")))));
 
         for (String sub : new String[]{"give", "take", "set"}) {
             root.then(literal(sub).requires(admin).executes(c.exec(sub))
@@ -301,6 +320,8 @@ final class Commands {
                     case "tier" -> tier(s, args);
                     case "auction" -> auction(s, args);
                     case "post-auction" -> postAuction(s);
+                    case "point" -> point(s, args);
+                    case "event" -> event(s, args);
                     default -> send(s, Fmt.PREFIX + " &cUnknown subcommand. Run &f/moneysmp &7for help.");
                 }
             }
@@ -339,6 +360,10 @@ final class Commands {
             send(s, "  &f/moneysmp tier clear &e<player>");
             send(s, "  &f/moneysmp auction &8[stop]");
             send(s, "  &f/moneysmp post-auction");
+            send(s, "  &f/moneysmp point &e<number>  &8(control point where you stand)");
+            send(s, "  &f/moneysmp point remove &e<number>  &8/ &fpoint list");
+            send(s, "  &f/moneysmp point loot &8/ &fsuperloot  &8(from the container in hand)");
+            send(s, "  &f/moneysmp event control-point &estart&8/&estop");
             send(s, "  &f/moneysmp transaction &e<time> [page]  &8(e.g. 1h 30m 7d)");
             send(s, "");
             send(s, "  &7&lTeams &8(count: " + data().teamCount + "):");
@@ -382,10 +407,11 @@ final class Commands {
                 boolean isOnline = online(e.getKey()) != null;
                 members.append(col).append(e.getValue().name).append(leader ? "&6★" : "").append(isOnline ? "" : "&8*");
             }
+            String pts = data().teamPoints.getOrDefault(t, 0) > 0 ? " &e" + data().teamPoints.get(t) + "pts" : "";
             if (count > 0) {
-                send(s, "  " + col + "&l" + t + " &8(" + count + ")  &8»  " + members);
+                send(s, "  " + col + "&l" + t + " &8(" + count + ")" + pts + "  &8»  " + members);
             } else {
-                send(s, "  " + col + "&l" + t + " &8(0)  &8»  &7Empty");
+                send(s, "  " + col + "&l" + t + " &8(0)" + pts + "  &8»  &7Empty");
             }
         }
         if (!data().disabledTeams.isEmpty()) {
@@ -454,6 +480,7 @@ final class Commands {
             count++;
         }
         data().teamLeaders.clear();
+        data().teamPoints.clear();
         for (ServerPlayer p : onlinePlayers()) plugin.sync(p);
         data().log("RESET", s.getTextName(), "ALL PLAYERS", 100, "Mass balance and teams reset");
         send(s, "");
@@ -957,5 +984,121 @@ final class Commands {
         }
         plugin.auction.bid(p, amt);
         return 1;
+    }
+
+    // ── control points ───────────────────────────────────────────
+
+    private void point(CommandSourceStack s, String[] args) {
+        ControlPoints cp = plugin.points;
+        if (args.length < 2) {
+            send(s, Fmt.PREFIX + " &cUsage: &f/moneysmp point <number> &8| &fremove <number> &8| &flist &8| &floot &8| &fsuperloot");
+            return;
+        }
+        switch (args[1].toLowerCase()) {
+            case "list" -> {
+                if (cp.points.isEmpty()) {
+                    send(s, Fmt.PREFIX + " &7No control points set.");
+                    return;
+                }
+                send(s, "");
+                send(s, Fmt.PREFIX + " &7Control Points  &8|  &7Loot: &f" + cp.loot.size() + " &7items, super: &f" + cp.superLoot.size()
+                    + (cp.running ? "  &8|  &a&lEVENT RUNNING" : ""));
+                for (Map.Entry<Integer, ControlPoints.Point> e : cp.points.entrySet()) {
+                    var c = e.getValue().pos();
+                    String held = cp.owner.get(e.getKey());
+                    send(s, "  &f#" + e.getKey() + " &8(" + c.getX() + ", " + c.getY() + ", " + c.getZ() + ") &7" + e.getValue().dim().identifier()
+                        + (cp.running && cp.superPoints.contains(e.getKey()) ? "  &8&l✦ SUPER" : "")
+                        + (held != null ? "  &8»  " + Teams.color(held) + held : ""));
+                }
+                send(s, "");
+            }
+            case "loot", "superloot" -> {
+                ServerPlayer p = s.getPlayer();
+                if (p == null) {
+                    send(s, Fmt.PREFIX + " &cPlayers only.");
+                    return;
+                }
+                ItemContainerContents held = p.getMainHandItem().get(DataComponents.CONTAINER);
+                if (held == null) {
+                    send(s, Fmt.PREFIX + " &cHold a shulker box (or other container item) filled with the prize.");
+                    return;
+                }
+                List<ItemStack> items = new ArrayList<>();
+                for (ItemStack st : held.nonEmptyItemsCopy()) items.add(st);
+                if (items.isEmpty()) {
+                    send(s, Fmt.PREFIX + " &cThat container is empty.");
+                    return;
+                }
+                boolean sup = args[1].equalsIgnoreCase("superloot");
+                cp.setLoot(sup, items);
+                send(s, Fmt.PREFIX + " &aSaved &e" + items.size() + " &astack(s) as the " + (sup ? "&8&l✦ super &r&a" : "") + "control point prize.");
+            }
+            case "remove" -> {
+                Integer n = args.length > 2 ? pointNumber(args[2]) : null;
+                if (n == null) {
+                    send(s, Fmt.PREFIX + " &cUsage: &f/moneysmp point remove <number>");
+                    return;
+                }
+                if (cp.running) {
+                    send(s, Fmt.PREFIX + " &cStop the event first with &f/moneysmp event control-point stop&c.");
+                    return;
+                }
+                if (!cp.remove(n)) send(s, Fmt.PREFIX + " &cNo control point &f#" + n + "&c.");
+                else send(s, Fmt.PREFIX + " &aRemoved control point &f#" + n + "&a.");
+            }
+            default -> {
+                Integer n = pointNumber(args[1]);
+                if (n == null) {
+                    send(s, Fmt.PREFIX + " &cUsage: &f/moneysmp point <number>");
+                    return;
+                }
+                ServerPlayer p = s.getPlayer();
+                if (p == null) {
+                    send(s, Fmt.PREFIX + " &cPlayers only.");
+                    return;
+                }
+                if (cp.running) {
+                    send(s, Fmt.PREFIX + " &cStop the event first with &f/moneysmp event control-point stop&c.");
+                    return;
+                }
+                boolean replaced = cp.points.containsKey(n);
+                cp.set(n, p);
+                var c = p.blockPosition();
+                send(s, Fmt.PREFIX + " &a" + (replaced ? "Moved" : "Set") + " control point &f#" + n + " &ato &8(" + c.getX() + ", " + c.getY() + ", " + c.getZ() + ")&a.");
+            }
+        }
+    }
+
+    private static Integer pointNumber(String s) {
+        try {
+            int n = Integer.parseInt(s);
+            return n > 0 ? n : null;
+        } catch (NumberFormatException e) {
+            return null;
+        }
+    }
+
+    private void event(CommandSourceStack s, String[] args) {
+        if (args.length < 3 || !args[1].equalsIgnoreCase("control-point")) {
+            send(s, Fmt.PREFIX + " &cUsage: &f/moneysmp event control-point <start|stop>");
+            return;
+        }
+        ControlPoints cp = plugin.points;
+        switch (args[2].toLowerCase()) {
+            case "start" -> {
+                String why = cp.start();
+                if (why != null) {
+                    send(s, Fmt.PREFIX + " " + why);
+                    return;
+                }
+                if (cp.loot.isEmpty()) send(s, Fmt.PREFIX + " &eNo prize set. Captures will only pay points and money. &7(/moneysmp point loot)");
+                if (!cp.superPoints.isEmpty() && cp.superLoot.isEmpty()) send(s, Fmt.PREFIX + " &eNo super prize set. &7(/moneysmp point superloot)");
+            }
+            case "stop" -> {
+                if (!cp.running) send(s, Fmt.PREFIX + " &cNo control point event is running.");
+                else cp.stop();
+            }
+            default -> send(s, Fmt.PREFIX + " &cUsage: &f/moneysmp event control-point <start|stop>");
+        }
     }
 }
