@@ -1,0 +1,23 @@
+{
+  "required": true,
+  "minVersion": "0.8",
+  "package": "dev.flame.moneysmp.mixin",
+  "compatibilityLevel": "JAVA_21",
+  "mixins": [
+    "BredAnimalsTriggerMixin",
+    "ComposterBlockMixin",
+    "ConsumeItemTriggerMixin",
+    "InventoryChangeTriggerMixin",
+    "LivingEntityMixin",
+    "PlayerInteractTriggerMixin",
+    "PlayerTriggerMixin",
+    "RaidMixin",
+    "RecipeCraftedTriggerMixin",
+    "SummonedEntityTriggerMixin",
+    "UsingItemTriggerMixin",
+    "VaultBlockEntityServerMixin"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  }
+}

@@ -133,10 +133,17 @@ final class Commands {
                 .then(literal("leader").executes(c.exec("team leader"))
                     .then(argument("player", word()).suggests(players).executes(c.exec("team leader", "player")))))
             .then(point)
+            .then(literal("unlockout").executes(c.exec("unlockout"))
+                .then(literal("list").executes(c.exec("unlockout list")))
+                .then(literal("map").executes(c.exec("unlockout map"))))
             .then(literal("event").requires(admin).executes(c.exec("event"))
                 .then(literal("control-point").executes(c.exec("event control-point"))
                     .then(literal("start").executes(c.exec("event control-point start")))
-                    .then(literal("stop").executes(c.exec("event control-point stop")))));
+                    .then(literal("stop").executes(c.exec("event control-point stop"))))
+                .then(literal("unlockout").executes(c.exec("event unlockout"))
+                    .then(literal("start").executes(c.exec("event unlockout start"))
+                        .then(argument("time", word()).suggests(times).executes(c.exec("event unlockout start", "time"))))
+                    .then(literal("stop").executes(c.exec("event unlockout stop")))));
 
         for (String sub : new String[]{"give", "take", "set"}) {
             root.then(literal(sub).requires(admin).executes(c.exec(sub))
@@ -159,6 +166,11 @@ final class Commands {
         d.register(literal("bid")
             .then(argument("amount", DoubleArgumentType.doubleArg())
                 .executes(ctx -> c.bid(ctx.getSource(), DoubleArgumentType.getDouble(ctx, "amount")))));
+
+        d.register(literal("unlockout")
+            .executes(ctx -> c.unlockout(ctx.getSource(), ""))
+            .then(literal("list").executes(ctx -> c.unlockout(ctx.getSource(), "list")))
+            .then(literal("map").executes(ctx -> c.unlockout(ctx.getSource(), "map"))));
 
         for (String name : new String[]{"balance", "bal"}) {
             d.register(literal(name)
@@ -293,6 +305,7 @@ final class Commands {
             case "myteam" -> myteam(s);
             case "teams" -> teams(s);
             case "tiers" -> tiers(s);
+            case "unlockout" -> unlockout(s, args.length > 1 ? args[1].toLowerCase() : "");
             case "bid" -> {
                 Double amt = args.length > 1 ? num(args[1]) : null;
                 if (amt == null) send(s, Fmt.PREFIX + " &cUsage: &f/bid <amount>");
@@ -347,6 +360,7 @@ final class Commands {
         send(s, "  &f/moneysmp myteam");
         send(s, "  &f/moneysmp teams");
         send(s, "  &f/moneysmp tiers");
+        send(s, "  &f/unlockout &8[list|map]  &8(during an unlockout event)");
         send(s, "  &f/pay &e<player> <amount>");
         send(s, "  &f/bid &e<amount>  &8(during an auction)");
         if (admin) {
@@ -373,6 +387,7 @@ final class Commands {
             send(s, "  &f/moneysmp point remove &e<number>  &8/ &fpoint list");
             send(s, "  &f/moneysmp point loot&8/&fsuperloot &eadd&8|&eclear&8|&elist&8|&emode <once|random>");
             send(s, "  &f/moneysmp event control-point &estart&8/&estop");
+            send(s, "  &f/moneysmp event unlockout &estart &8[time]&8/&estop");
             send(s, "  &f/moneysmp transaction &e<time> [page]  &8(e.g. 1h 30m 7d)");
             send(s, "");
             send(s, "  &7&lTeams &8(count: " + data().teamCount + "):");
@@ -1129,9 +1144,54 @@ final class Commands {
         }
     }
 
+    // ── unlockout ────────────────────────────────────────────────
+
+    private int unlockout(CommandSourceStack s, String sub) {
+        Unlockout u = plugin.unlockout;
+        if (!u.running) {
+            send(s, Fmt.PREFIX + " &7No unlockout event is running.");
+            return 0;
+        }
+        if (sub.equals("map")) {
+            ServerPlayer p = s.getPlayer();
+            if (p == null) {
+                send(s, Fmt.PREFIX + " &cPlayers only.");
+                return 0;
+            }
+            u.giveMap(p);
+            send(s, Fmt.PREFIX + " &aHere's your board.");
+            return 1;
+        }
+        u.show(s, sub.equals("list"));
+        return 1;
+    }
+
     private void event(CommandSourceStack s, String[] args) {
+        if (args.length >= 3 && args[1].equalsIgnoreCase("unlockout")) {
+            Unlockout u = plugin.unlockout;
+            switch (args[2].toLowerCase()) {
+                case "start" -> {
+                    long secs = 0;
+                    if (args.length > 3) {
+                        secs = Fmt.parseTime(args[3]);
+                        if (secs <= 0) {
+                            send(s, Fmt.PREFIX + " &cBad time. Use something like &f2h&c, &f90m &cor &f1d&c.");
+                            return;
+                        }
+                    }
+                    String why = u.start(secs);
+                    if (why != null) send(s, Fmt.PREFIX + " " + why);
+                }
+                case "stop" -> {
+                    if (!u.running) send(s, Fmt.PREFIX + " &cNo unlockout event is running.");
+                    else u.stop();
+                }
+                default -> send(s, Fmt.PREFIX + " &cUsage: &f/moneysmp event unlockout <start [time]|stop>");
+            }
+            return;
+        }
         if (args.length < 3 || !args[1].equalsIgnoreCase("control-point")) {
-            send(s, Fmt.PREFIX + " &cUsage: &f/moneysmp event control-point <start|stop>");
+            send(s, Fmt.PREFIX + " &cUsage: &f/moneysmp event control-point <start|stop> &8| &funlockout <start [time]|stop>");
             return;
         }
         ControlPoints cp = plugin.points;

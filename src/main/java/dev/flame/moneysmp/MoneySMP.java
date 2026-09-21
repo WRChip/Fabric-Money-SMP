@@ -42,6 +42,7 @@ public final class MoneySMP implements ModInitializer {
     Config config;
     final Auction auction = new Auction(this);
     final ControlPoints points = new ControlPoints(this);
+    final Unlockout unlockout = new Unlockout(this);
     private int tick;
 
     @Override
@@ -54,6 +55,7 @@ public final class MoneySMP implements ModInitializer {
             data = new Data(dir, s);
             data.load();
             points.load(dir);
+            unlockout.load(dir);
             Teams.setup(s);
             for (ServerPlayer p : s.getPlayerList().getPlayers()) sync(p);
         });
@@ -68,21 +70,26 @@ public final class MoneySMP implements ModInitializer {
         ServerPlayConnectionEvents.DISCONNECT.register((handler, s) -> {
             notify.remove(handler.player.getUUID());
             status.remove(handler.player.getUUID());
+            unlockout.leave(handler.player);
         });
         ServerLivingEntityEvents.AFTER_DEATH.register((entity, source) -> {
             if (entity instanceof ServerPlayer victim) onDeath(victim);
+            unlockout.onDeath(entity, source);
         });
+        ServerLivingEntityEvents.MOB_CONVERSION.register((from, to, params) -> unlockout.onConversion(from, to));
         // the client keeps its waypoints across respawns and dimension changes, so resend
         // (or clear) ours whenever vanilla would have resent the player ones
         ServerPlayerEvents.AFTER_RESPAWN.register((old, p, alive) -> {
             ControlPoints.hideFromLocator(p);
             points.sendWaypoints(p);
+            unlockout.giveMap(p);
         });
         ServerEntityWorldChangeEvents.AFTER_PLAYER_CHANGE_WORLD.register((p, from, to) -> points.sendWaypoints(p));
         ServerTickEvents.END_SERVER_TICK.register(s -> {
             tick++;
             if (tick % 20 == 0) {
                 points.tick();
+                unlockout.tick();
                 actionBarTick();
                 auction.tick();
             }
@@ -106,6 +113,7 @@ public final class MoneySMP implements ModInitializer {
         sync(p);
         ControlPoints.hideFromLocator(p);
         points.sendWaypoints(p);
+        unlockout.join(p);
     }
 
     // PvP only: attacker +$20, victim -$20. Mob kills give nothing.
