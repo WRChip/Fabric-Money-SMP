@@ -6,9 +6,7 @@ import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
-import com.mojang.brigadier.exceptions.CommandSyntaxException;
 import com.mojang.serialization.JsonOps;
-import net.minecraft.commands.arguments.blocks.BlockStateParser;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.particles.DustParticleOptions;
 import net.minecraft.core.registries.Registries;
@@ -23,9 +21,6 @@ import net.minecraft.world.entity.ai.attributes.Attributes;
 import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.Level;
-import net.minecraft.world.level.block.Block;
-import net.minecraft.world.level.block.Blocks;
-import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.waypoints.Waypoint;
 
 import java.io.IOException;
@@ -45,10 +40,12 @@ import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
 
 // KOTH-style capture points. /moneysmp point <n> marks one where the admin stands; the
-// control-point event drops a beacon on each, puts them on the locator bar and pays out to
-// the team that holds one long enough. ticked once a second by MoneySMP while running
+// control-point event draws a particle beam and ring on each, puts them on the locator bar
+// and pays out to the team that holds one long enough. nothing in the world is changed.
+// ticked once a second by MoneySMP while running
 final class ControlPoints {
     static final int RADIUS = 5;
+    static final int HEIGHT = 10;
     // one player earns their team 5% every 30s. super points take four times as long
     private static final double RATE = 5.0 / 30;
     private static final int SUPER_SLOWDOWN = 4;
@@ -57,7 +54,6 @@ final class ControlPoints {
     private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
 
     record Point(ResourceKey<Level> dim, BlockPos pos) {}
-    private record Placed(ResourceKey<Level> dim, BlockPos pos, BlockState state) {}
 
     // several prize sets. "once" hands them out in order, each set a single time per event;
     // "random" rolls any set on every capture
@@ -87,9 +83,6 @@ final class ControlPoints {
     final Set<Integer> superPoints = new HashSet<>();
     final Map<Integer, String> owner = new HashMap<>();
     private final Map<Integer, Map<String, Double>> progress = new HashMap<>();
-    // what the beacon platforms replaced, put back when the event ends. persisted with the
-    // rest of the event so a crash mid-event resumes instead of stranding beacons
-    private final List<Placed> placed = new ArrayList<>();
     private int phase;
 
     ControlPoints(MoneySMP plugin) {
@@ -118,7 +111,6 @@ final class ControlPoints {
         superPoints.clear();
         owner.clear();
         progress.clear();
-        placed.clear();
         running = false;
         if (!Files.exists(file)) return;
         try {
@@ -139,16 +131,10 @@ final class ControlPoints {
                 for (Map.Entry<String, JsonElement> e : ev.getAsJsonObject("owner").entrySet()) {
                     owner.put(Integer.parseInt(e.getKey()), e.getValue().getAsString());
                 }
-                var blocks = plugin.server.registryAccess().lookupOrThrow(Registries.BLOCK);
-                for (JsonElement el : ev.getAsJsonArray("placed")) {
-                    JsonObject o = el.getAsJsonObject();
-                    BlockState state = BlockStateParser.parseForBlock(blocks, o.get("state").getAsString(), false).blockState();
-                    placed.add(new Placed(dim(o), pos(o), state));
-                }
                 running = true;
                 MoneySMP.LOG.info("resuming control point event: {} of {} points captured", owner.size(), points.size());
             }
-        } catch (IOException | RuntimeException | CommandSyntaxException e) {
+        } catch (IOException | RuntimeException e) {
             MoneySMP.LOG.error("could not read points.json", e);
         }
     }
@@ -174,14 +160,6 @@ final class ControlPoints {
             JsonObject own = new JsonObject();
             owner.forEach((n, t) -> own.addProperty(String.valueOf(n), t));
             ev.add("owner", own);
-            JsonArray pl = new JsonArray();
-            for (Placed p : placed) {
-                JsonObject o = new JsonObject();
-                put(o, p.dim(), p.pos());
-                o.addProperty("state", BlockStateParser.serialize(p.state()));
-                pl.add(o);
-            }
-            ev.add("placed", pl);
             y.add("event", ev);
         }
         try {
@@ -285,16 +263,11 @@ final class ControlPoints {
         superPoints.clear();
         owner.clear();
         progress.clear();
-        placed.clear();
         loot.next = 0;
         superLoot.next = 0;
         List<Integer> ids = new ArrayList<>(points.keySet());
         Collections.shuffle(ids);
         for (int i = 0; i < Math.round(ids.size() / 4.0); i++) superPoints.add(ids.get(i));
-        for (Map.Entry<Integer, Point> e : points.entrySet()) {
-            Block glass = superPoints.contains(e.getKey()) ? Blocks.GRAY_STAINED_GLASS : Blocks.LIGHT_GRAY_STAINED_GLASS;
-            place(plugin.server.getLevel(e.getValue().dim()), e.getValue().pos(), glass);
-        }
         running = true;
         save();
 
@@ -317,11 +290,6 @@ final class ControlPoints {
 
     private void end(String reason) {
         running = false;
-        for (Placed p : placed) {
-            ServerLevel level = plugin.server.getLevel(p.dim());
-            if (level != null) level.setBlockAndUpdate(p.pos(), p.state());
-        }
-        placed.clear();
         progress.clear();
         save();
         broadcast("");
@@ -335,21 +303,6 @@ final class ControlPoints {
         for (ServerPlayer p : players()) clearWaypoints(p);
     }
 
-    // beacon under the block the admin stood on, iron under that, glass on top for the colour
-    private void place(ServerLevel level, BlockPos c, Block glass) {
-        BlockPos beacon = c.below();
-        for (int dx = -1; dx <= 1; dx++) {
-            for (int dz = -1; dz <= 1; dz++) put(level, beacon.below().offset(dx, 0, dz), Blocks.IRON_BLOCK);
-        }
-        put(level, beacon, Blocks.BEACON);
-        put(level, c, glass);
-    }
-
-    private void put(ServerLevel level, BlockPos pos, Block block) {
-        placed.add(new Placed(level.dimension(), pos, level.getBlockState(pos)));
-        level.setBlockAndUpdate(pos, block.defaultBlockState());
-    }
-
     void tick() {
         if (!running) return;
         phase++;
@@ -360,7 +313,9 @@ final class ControlPoints {
             if (level == null) continue;
             String held = owner.get(n);
             boolean sup = superPoints.contains(n);
-            ring(level, pt.pos(), held != null ? Teams.rgb(held) : sup ? NETHERITE : GRAY);
+            int color = held != null ? Teams.rgb(held) : sup ? NETHERITE : GRAY;
+            ring(level, pt.pos(), color);
+            beam(level, pt.pos(), color);
             if (held != null) continue;
 
             Map<String, Integer> present = new HashMap<>();
@@ -403,7 +358,7 @@ final class ControlPoints {
         double dx = p.getX() - (c.getX() + 0.5);
         double dz = p.getZ() - (c.getZ() + 0.5);
         double dy = p.getY() - c.getY();
-        return dx * dx + dz * dz <= RADIUS * RADIUS && dy >= -2 && dy <= 4;
+        return dx * dx + dz * dz <= RADIUS * RADIUS && dy >= -1 && dy <= HEIGHT;
     }
 
     private static String status(int n, boolean sup, Map<String, Double> prog, boolean contested) {
@@ -427,6 +382,17 @@ final class ControlPoints {
         }
     }
 
+    // a column of dust from the ring up into the sky. forced so it shows from far away
+    // like a real beacon beam; each packet scatters its particles around one height
+    private static void beam(ServerLevel level, BlockPos c, int color) {
+        DustParticleOptions dust = new DustParticleOptions(color, 2f);
+        double cx = c.getX() + 0.5;
+        double cz = c.getZ() + 0.5;
+        for (int i = 0; i < 4; i++) {
+            level.sendParticles(dust, true, true, cx, c.getY() + 10 + i * 20, cz, 20, 0, 8, 0, 0);
+        }
+    }
+
     // true when this was the last point and the event is over
     private boolean capture(int n, String team) {
         Point pt = points.get(n);
@@ -434,7 +400,6 @@ final class ControlPoints {
         boolean sup = superPoints.contains(n);
         owner.put(n, team);
         progress.remove(n);
-        level.setBlockAndUpdate(pt.pos(), Teams.glass(team).defaultBlockState());
 
         Config cfg = plugin.config;
         int total = plugin.data.teamPoints.merge(team, cfg.controlPointPoints, Integer::sum);
