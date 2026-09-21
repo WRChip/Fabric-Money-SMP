@@ -21,6 +21,8 @@ final class Config {
     // per captured control point: team points, and money for every member of the team
     int controlPointPoints = 10;
     double controlPointMoney = 100;
+    // per unlockout point earned (goal, line or full board), paid to every member of the team
+    double unlockoutMoneyPerPoint = 10;
 
     Config() {
         double[] mins = {100, 70, 50, 40, 35, 30, 30};
@@ -49,6 +51,7 @@ final class Config {
             }
             if (y.has("controlPointPoints")) c.controlPointPoints = y.get("controlPointPoints").getAsInt();
             if (y.has("controlPointMoney")) c.controlPointMoney = y.get("controlPointMoney").getAsDouble();
+            if (y.has("unlockoutMoneyPerPoint")) c.unlockoutMoneyPerPoint = y.get("unlockoutMoneyPerPoint").getAsDouble();
         } catch (IOException | RuntimeException e) {
             MoneySMP.LOG.error("could not read config.json, using defaults", e);
         }
