@@ -34,6 +34,7 @@ Admin (`moneysmp.admin`):
 - `/moneysmp randomteams [tier]`
 - `/moneysmp auction [stop]`
 - `/moneysmp post-auction`
+- `/moneysmp reload` (reread `config.json`; a file that fails to parse keeps the current settings)
 - `/moneysmp tier set|clear <player> [tier]`
 - `/moneysmp teammax <number>`
 - `/moneysmp teamcount <count>`
@@ -47,7 +48,9 @@ Admin (`moneysmp.admin`):
 
 ## Control points
 
-Each point gets a light grey particle beam into the sky and a 5-block particle ring; nothing in the world is changed. The capture zone is a cylinder from one block below the point to ten above it. One player standing in the ring earns their team 5% every 30 seconds, so five players capture a point in two minutes. When several teams share a ring only the larger team gains, at the pace of its extra players. A quarter of the points (rounded) are picked as super points each event: darker netherite-coloured beam, four times slower to capture, and they draw from the `superloot` sets instead of `loot`. Each pool holds any number of prize sets, added one container at a time. In `once` mode captures hand the sets out in order, each a single time per event (later captures drop nothing once they run out); in `random` mode every capture rolls any set. A capture pays the team `controlPointPoints` and every member `controlPointMoney` (both in `config.json`), turns the beam and ring the team colour and drops the prize in the ring. The locator bar shows only points: grey while unclaimed, team colour once captured, and it disappears when every point is taken. A running event survives a restart.
+Each point gets a light grey particle beam into the sky and a 5-block particle ring; nothing in the world is changed. The capture zone is a cylinder from one block below the point to ten above it. One player standing in the ring earns their team `controlPointPercentPer30s` every 30 seconds, 5 by default, so five players capture a point in two minutes. When several teams share a ring only the larger team gains, at the pace of its extra players. A quarter of the points (rounded) are picked as super points each event: darker netherite-coloured beam, four times slower to capture, and they draw from the `superloot` sets instead of `loot`. Each pool holds any number of prize sets, added one container at a time. In `once` mode captures hand the sets out in order, each a single time per event (later captures drop nothing once they run out); in `random` mode every capture rolls any set. A capture pays the team `controlPointPoints` and every member `controlPointMoney` (in `config.json`), turns the beam and ring the team colour and drops the prize in the ring. The locator bar shows only points: grey while unclaimed, team colour once captured, and it disappears when every point is taken. A running event survives a restart.
+
+The numbers above are defaults. `config.json` can change them with `controlPointPercentPer30s` (5), `controlPointRadius` (5), `controlPointHeight` (10), `controlPointSuperPercent` (25) and `controlPointSuperSlowdown` (4).
 
 ## Unlockout
 

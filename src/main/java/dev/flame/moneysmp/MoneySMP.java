@@ -16,6 +16,7 @@ import net.minecraft.world.entity.LivingEntity;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.nio.file.Path;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Objects;
@@ -38,6 +39,7 @@ public final class MoneySMP implements ModInitializer {
     private record Status(double money, String team, Component msg) {}
     private final Map<UUID, Status> status = new HashMap<>();
     MinecraftServer server;
+    Path dir;
     Data data;
     Config config;
     final Auction auction = new Auction(this);
@@ -50,8 +52,9 @@ public final class MoneySMP implements ModInitializer {
         ServerLifecycleEvents.SERVER_STARTED.register(s -> {
             server = s;
             tick = 0;
-            var dir = FabricLoader.getInstance().getConfigDir().resolve("moneysmp");
+            dir = FabricLoader.getInstance().getConfigDir().resolve("moneysmp");
             config = Config.load(dir);
+            if (config.error != null) LOG.warn("using default settings until config.json is fixed");
             data = new Data(dir, s);
             data.load();
             points.load(dir);
@@ -87,6 +90,7 @@ public final class MoneySMP implements ModInitializer {
         ServerEntityWorldChangeEvents.AFTER_PLAYER_CHANGE_WORLD.register((p, from, to) -> points.sendWaypoints(p));
         ServerTickEvents.END_SERVER_TICK.register(s -> {
             tick++;
+            if (tick % 5 == 0) points.draw();
             if (tick % 20 == 0) {
                 points.tick();
                 unlockout.tick();

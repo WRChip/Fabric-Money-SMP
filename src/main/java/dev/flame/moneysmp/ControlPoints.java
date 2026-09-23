@@ -44,11 +44,6 @@ import java.util.concurrent.ThreadLocalRandom;
 // and pays out to the team that holds one long enough. nothing in the world is changed.
 // ticked once a second by MoneySMP while running
 final class ControlPoints {
-    static final int RADIUS = 5;
-    static final int HEIGHT = 10;
-    // one player earns their team 5% every 30s. super points take four times as long
-    private static final double RATE = 5.0 / 30;
-    private static final int SUPER_SLOWDOWN = 4;
     private static final int GRAY = 0x9D9D97;
     private static final int NETHERITE = 0x4D494D;
     private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
@@ -267,7 +262,8 @@ final class ControlPoints {
         superLoot.next = 0;
         List<Integer> ids = new ArrayList<>(points.keySet());
         Collections.shuffle(ids);
-        for (int i = 0; i < Math.round(ids.size() / 4.0); i++) superPoints.add(ids.get(i));
+        long supers = Math.round(ids.size() * plugin.config.controlPointSuperPercent / 100);
+        for (int i = 0; i < supers; i++) superPoints.add(ids.get(i));
         running = true;
         save();
 
@@ -303,9 +299,24 @@ final class ControlPoints {
         for (ServerPlayer p : players()) clearWaypoints(p);
     }
 
-    void tick() {
+    // dust lives about a second, so the beam and ring are redrawn a few times a second
+    // to stay solid. called by MoneySMP every 5 ticks
+    void draw() {
         if (!running) return;
         phase++;
+        for (Map.Entry<Integer, Point> e : points.entrySet()) {
+            Point pt = e.getValue();
+            ServerLevel level = plugin.server.getLevel(pt.dim());
+            if (level == null) continue;
+            String held = owner.get(e.getKey());
+            int color = held != null ? Teams.rgb(held) : superPoints.contains(e.getKey()) ? NETHERITE : GRAY;
+            ring(level, pt.pos(), color);
+            beam(level, pt.pos(), color);
+        }
+    }
+
+    void tick() {
+        if (!running) return;
         for (Map.Entry<Integer, Point> e : points.entrySet()) {
             int n = e.getKey();
             Point pt = e.getValue();
@@ -313,9 +324,6 @@ final class ControlPoints {
             if (level == null) continue;
             String held = owner.get(n);
             boolean sup = superPoints.contains(n);
-            int color = held != null ? Teams.rgb(held) : sup ? NETHERITE : GRAY;
-            ring(level, pt.pos(), color);
-            beam(level, pt.pos(), color);
             if (held != null) continue;
 
             Map<String, Integer> present = new HashMap<>();
@@ -341,7 +349,8 @@ final class ControlPoints {
             Map<String, Double> prog = progress.computeIfAbsent(n, k -> new HashMap<>());
             // a contested point only moves for the bigger team, at the pace of its extra players
             if (top != null && topCount > second) {
-                double gain = (topCount - second) * RATE / (sup ? SUPER_SLOWDOWN : 1);
+                double rate = plugin.config.controlPointPercentPer30s / 30;
+                double gain = (topCount - second) * rate / (sup ? plugin.config.controlPointSuperSlowdown : 1);
                 if (prog.merge(top, gain, Double::sum) >= 100) {
                     if (capture(n, top)) return;
                     continue;
@@ -354,11 +363,12 @@ final class ControlPoints {
         }
     }
 
-    private static boolean inRing(ServerPlayer p, BlockPos c) {
+    private boolean inRing(ServerPlayer p, BlockPos c) {
+        int r = plugin.config.controlPointRadius;
         double dx = p.getX() - (c.getX() + 0.5);
         double dz = p.getZ() - (c.getZ() + 0.5);
         double dy = p.getY() - c.getY();
-        return dx * dx + dz * dz <= RADIUS * RADIUS && dy >= -1 && dy <= HEIGHT;
+        return dx * dx + dz * dz <= r * r && dy >= -1 && dy <= plugin.config.controlPointHeight;
     }
 
     private static String status(int n, boolean sup, Map<String, Double> prog, boolean contested) {
@@ -372,24 +382,27 @@ final class ControlPoints {
     }
 
     private void ring(ServerLevel level, BlockPos c, int color) {
-        DustParticleOptions dust = new DustParticleOptions(color, 1.2f);
+        DustParticleOptions dust = new DustParticleOptions(color, 1.5f);
         double cx = c.getX() + 0.5;
         double cz = c.getZ() + 0.5;
         double y = c.getY() + 0.3;
-        for (int i = 0; i < 16; i++) {
-            double a = (i + phase * 0.37) * Math.PI * 2 / 16;
-            level.sendParticles(dust, cx + Math.cos(a) * RADIUS, y, cz + Math.sin(a) * RADIUS, 1, 0, 0, 0, 0);
+        int r = plugin.config.controlPointRadius;
+        // same spacing as 8 around the default radius, so bigger rings don't thin out
+        int count = Math.max(8, r * 8 / 5);
+        for (int i = 0; i < count; i++) {
+            double a = (i + phase * 0.37) * Math.PI * 2 / count;
+            level.sendParticles(dust, cx + Math.cos(a) * r, y, cz + Math.sin(a) * r, 1, 0, 0, 0, 0);
         }
     }
 
-    // a column of dust from the ring up into the sky. forced so it shows from far away
-    // like a real beacon beam; each packet scatters its particles around one height
+    // a thick column of dust from the ring up into the sky. forced so it shows from far
+    // away like a real beacon beam; each packet scatters its particles around one height
     private static void beam(ServerLevel level, BlockPos c, int color) {
-        DustParticleOptions dust = new DustParticleOptions(color, 2f);
+        DustParticleOptions dust = new DustParticleOptions(color, 4f);
         double cx = c.getX() + 0.5;
         double cz = c.getZ() + 0.5;
-        for (int i = 0; i < 4; i++) {
-            level.sendParticles(dust, true, true, cx, c.getY() + 10 + i * 20, cz, 20, 0, 8, 0, 0);
+        for (int i = 0; i < 8; i++) {
+            level.sendParticles(dust, true, true, cx, c.getY() + 5 + i * 10, cz, 12, 0.4, 3, 0.4, 0);
         }
     }
 

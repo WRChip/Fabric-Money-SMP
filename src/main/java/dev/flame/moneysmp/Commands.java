@@ -33,7 +33,7 @@ import static com.mojang.brigadier.arguments.StringArgumentType.word;
 final class Commands {
     private static final String LINE = "&8&m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━";
     private static final List<String> ADMIN_SUBS = List.of("give", "take", "set", "reset", "fine", "transaction",
-        "teambal", "teammax", "teamcount", "team", "randomteams", "tier", "auction", "post-auction", "point", "event");
+        "teambal", "teammax", "teamcount", "team", "randomteams", "tier", "auction", "post-auction", "point", "event", "reload");
     // reshaping teams or tiers under a live auction would leave it selling players that
     // moved or bidding for teams whose leader changed
     private static final Set<String> LOCKED_DURING_AUCTION = Set.of("reset", "randomteams", "tier", "team", "post-auction");
@@ -105,6 +105,7 @@ final class Commands {
             .then(literal("auction").requires(admin).executes(c.exec("auction"))
                 .then(literal("stop").executes(c.exec("auction stop"))))
             .then(literal("post-auction").requires(admin).executes(c.exec("post-auction")))
+            .then(literal("reload").requires(admin).executes(c.exec("reload")))
             .then(literal("tier").requires(admin).executes(c.exec("tier"))
                 .then(literal("set").executes(c.exec("tier set"))
                     .then(argument("player", word()).suggests(players).executes(c.exec("tier set", "player"))
@@ -348,6 +349,7 @@ final class Commands {
                     case "post-auction" -> postAuction(s);
                     case "point" -> point(s, args);
                     case "event" -> event(s, args);
+                    case "reload" -> reload(s);
                     default -> send(s, Fmt.PREFIX + " &cUnknown subcommand. Run &f/moneysmp &7for help.");
                 }
             }
@@ -393,6 +395,7 @@ final class Commands {
             send(s, "  &f/moneysmp event control-point &estart&8/&estop");
             send(s, "  &f/moneysmp event unlockout &estart &8[time]&8/&estop");
             send(s, "  &f/moneysmp transaction &e<time> [page]  &8(e.g. 1h 30m 7d)");
+            send(s, "  &f/moneysmp reload  &8(reread config.json)");
             send(s, "");
             send(s, "  &7&lTeams &8(count: " + data().teamCount + "):");
             send(s, "  &c1 Red  &92 Blue  &53 Purple");
@@ -977,6 +980,16 @@ final class Commands {
             send(s, Fmt.PREFIX + " &aSet &f" + pd.name + " &ato tier " + Tiers.color(tier) + "&l" + tier + "&a.");
             if (target != null) send(target, Fmt.PREFIX + " &7You are now tier " + Tiers.color(tier) + "&l" + tier);
         }
+    }
+
+    private void reload(CommandSourceStack s) {
+        Config fresh = Config.load(plugin.dir);
+        if (fresh.error != null) {
+            send(s, Fmt.PREFIX + " &cCould not read config.json, kept the current settings: &f" + fresh.error);
+            return;
+        }
+        plugin.config = fresh;
+        send(s, Fmt.PREFIX + " &aReloaded config.json.");
     }
 
     private void auction(CommandSourceStack s, String[] args) {
