@@ -21,6 +21,7 @@ final class Config {
     // per captured control point: team points, and money for every member of the team
     int controlPointPoints = 10;
     double controlPointMoney = 100;
+    double controlPointSuperMoney = 100;
     // capture progress one player earns per 30s; five players at 5 take two minutes
     double controlPointPercentPer30s = 5;
     // ring radius, and how far above the point still counts as inside
@@ -61,6 +62,7 @@ final class Config {
             }
             if (y.has("controlPointPoints")) c.controlPointPoints = y.get("controlPointPoints").getAsInt();
             if (y.has("controlPointMoney")) c.controlPointMoney = y.get("controlPointMoney").getAsDouble();
+            if (y.has("controlPointSuperMoney")) c.controlPointSuperMoney = y.get("controlPointSuperMoney").getAsDouble();
             // zero or less would make points uncapturable, so keep it above nothing
             if (y.has("controlPointPercentPer30s")) c.controlPointPercentPer30s = Math.max(0.01, y.get("controlPointPercentPer30s").getAsDouble());
             if (y.has("controlPointRadius")) c.controlPointRadius = Math.max(1, y.get("controlPointRadius").getAsInt());

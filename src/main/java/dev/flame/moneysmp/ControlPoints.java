@@ -270,11 +270,7 @@ final class ControlPoints {
         broadcast("");
         broadcast(Fmt.PREFIX + " &a&l⚑ CONTROL POINT EVENT STARTED ⚑");
         broadcast("  &7Stand inside a ring to capture it for your team. Follow the locator bar!");
-        for (Map.Entry<Integer, Point> e : points.entrySet()) {
-            BlockPos c = e.getValue().pos();
-            broadcast("  &7#" + e.getKey() + " &8(" + c.getX() + ", " + c.getY() + ", " + c.getZ() + ")"
-                + (superPoints.contains(e.getKey()) ? "  &8&l✦ SUPER" : ""));
-        }
+        broadcast("  &7Points: &f" + points.size() + (superPoints.isEmpty() ? "" : "  &8|  &8&l✦ &7Super: &f" + superPoints.size()));
         broadcast("");
         for (ServerPlayer p : players()) sendWaypoints(p);
         return null;
@@ -415,14 +411,15 @@ final class ControlPoints {
         progress.remove(n);
 
         Config cfg = plugin.config;
+        double money = sup ? cfg.controlPointSuperMoney : cfg.controlPointMoney;
         int total = plugin.data.teamPoints.merge(team, cfg.controlPointPoints, Integer::sum);
         for (Map.Entry<UUID, Data.PlayerData> e : plugin.data.players.entrySet()) {
             Data.PlayerData pd = e.getValue();
             if (!team.equals(pd.team)) continue;
-            pd.money += cfg.controlPointMoney;
-            plugin.data.log("POINT", "CONTROL POINT #" + n, pd.name, cfg.controlPointMoney, "Captured control point");
+            pd.money += money;
+            plugin.data.log("POINT", "CONTROL POINT #" + n, pd.name, money, sup ? "Captured super control point" : "Captured control point");
             if (plugin.server.getPlayerList().getPlayer(e.getKey()) != null) {
-                plugin.notify(e.getKey(), "&a&l+ $" + Fmt.money(cfg.controlPointMoney) + "  &7Point #" + n + " captured!  &8|  &a$ &e" + Fmt.money(pd.money), 6);
+                plugin.notify(e.getKey(), "&a&l+ $" + Fmt.money(money) + "  &7Point #" + n + " captured!  &8|  &a$ &e" + Fmt.money(pd.money), 6);
             }
         }
         drop(level, pt.pos(), pool(sup).take());
@@ -430,7 +427,7 @@ final class ControlPoints {
         String col = Teams.color(team);
         broadcast("");
         broadcast(Fmt.PREFIX + " " + col + "&l" + team + " &acaptured " + (sup ? "&8&l✦ super " : "") + "&acontrol point &f#" + n + "&a!");
-        broadcast("  &7+" + cfg.controlPointPoints + " pts  &8|  &7+$" + Fmt.money(cfg.controlPointMoney) + " per member  &8|  " + col + team + " &7now has &e" + total + " pts");
+        broadcast("  &7+" + cfg.controlPointPoints + " pts  &8|  &7+$" + Fmt.money(money) + " per member  &8|  " + col + team + " &7now has &e" + total + " pts");
         broadcast("");
         save();
         for (ServerPlayer p : players()) sendWaypoints(p);
