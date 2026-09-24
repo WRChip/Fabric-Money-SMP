@@ -101,7 +101,7 @@ public final class Unlockout {
         new Goal("Relic disc from trail ruins", "RELIC|DISC|", Kind.FLAG, 1, ""),
         new Goal("Deal 1,000,000 damage", "DEAL|1M|DAMAGE", Kind.COUNT, 1_000_000, "damage"),
         new Goal("1,024 red concrete", "1024|RED|CONCRT", Kind.COUNT, 1024, "red concrete"),
-        new Goal("Reach XP level 70", "REACH|LEVEL|70", Kind.FLAG, 1, ""),
+        new Goal("Reach XP level 267", "REACH|LEVEL|267", Kind.FLAG, 1, ""),
         new Goal("Wear a full set of netherite armor", "WEAR|NETHRT|ARMOR", Kind.FLAG, 1, ""),
         new Goal("Apply the silence trim to your entire armor", "SILNCE|TRIM|ARMOR", Kind.FLAG, 1, ""),
         new Goal("Kill 28 different hostile mob types", "KILL|28 MOB|TYPES", Kind.SET, 28, "types"),
@@ -387,7 +387,7 @@ public final class Unlockout {
             sample(p);
             String team = team(p);
             if (team == null || p.isSpectator()) continue;
-            if (p.experienceLevel >= 70) flag(team, LEVEL);
+            if (p.experienceLevel >= 267) flag(team, LEVEL);
             if (netheriteSet(p)) flag(team, ARMOR);
             if (silenceSet(p)) flag(team, TRIM);
             if (p.getActiveEffects().size() >= 15) flag(team, EFFECTS);
