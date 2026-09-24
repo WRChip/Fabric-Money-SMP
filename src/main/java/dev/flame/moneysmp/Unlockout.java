@@ -307,9 +307,7 @@ public final class Unlockout {
             + " pts&7, then " + GOAL_STEP + " less each; a full row, column or diagonal is &e" + LINE_POINTS + " pts &7and down by " + LINE_STEP + ".");
         broadcast("  &7The whole board is worth &e+" + BOARD_POINTS + " &7and ends it"
             + (seconds > 0 ? ", otherwise it ends in &f" + Fmt.timeAgo(seconds) + "&7." : "."));
-        if (plugin.config.unlockoutMoneyPerPoint > 0) {
-            broadcast("  &7Every point pays every teammate &e$" + Fmt.money(plugin.config.unlockoutMoneyPerPoint) + " &7too.");
-        }
+        broadcast("  &7When it ends every teammate is paid &e$1 &7per point their team scored.");
         broadcast("  &7Your map shows the board. &f/unlockout &7lists the goals, &f/unlockout map &7gets a new map.");
         broadcast("");
         for (ServerPlayer p : players()) join(p);
@@ -331,7 +329,9 @@ public final class Unlockout {
         broadcast("");
         broadcast(Fmt.PREFIX + " " + reason);
         for (Map.Entry<String, Integer> e : standings()) {
-            broadcast("  " + Teams.color(e.getKey()) + "&l" + e.getKey() + "  &e" + e.getValue() + " pts  &8(" + doneCount(e.getKey()) + "/" + GOALS.size() + " goals)");
+            broadcast("  " + Teams.color(e.getKey()) + "&l" + e.getKey() + "  &e" + e.getValue() + " pts  &8(" + doneCount(e.getKey()) + "/" + GOALS.size() + " goals)"
+                + (e.getValue() > 0 ? "  &8|  &7+$" + Fmt.money(e.getValue()) + " each" : ""));
+            payOut(e.getKey(), e.getValue());
         }
         broadcast("");
     }
@@ -345,22 +345,22 @@ public final class Unlockout {
         return out;
     }
 
-    // adds pts to the event score and pays every member of the team its cash value
     private int award(String team, int pts) {
-        int now = score.merge(team, pts, Integer::sum);
-        double money = pts * plugin.config.unlockoutMoneyPerPoint;
-        if (money > 0) {
-            for (Map.Entry<UUID, Data.PlayerData> e : plugin.data.players.entrySet()) {
-                Data.PlayerData pd = e.getValue();
-                if (!team.equals(pd.team)) continue;
-                pd.money += money;
-                plugin.data.log("UNLOCKOUT", "UNLOCKOUT", pd.name, money, "Unlockout points");
-                if (plugin.server.getPlayerList().getPlayer(e.getKey()) != null) {
-                    plugin.notify(e.getKey(), "&a&l+ $" + Fmt.money(money) + "  &7Unlockout!  &8|  &a$ &e" + Fmt.money(pd.money), 6);
-                }
+        return score.merge(team, pts, Integer::sum);
+    }
+
+    // paid once when the event ends: every member of a team gets its final score in cash
+    private void payOut(String team, int pts) {
+        if (pts <= 0) return;
+        for (Map.Entry<UUID, Data.PlayerData> e : plugin.data.players.entrySet()) {
+            Data.PlayerData pd = e.getValue();
+            if (!team.equals(pd.team)) continue;
+            pd.money += pts;
+            plugin.data.log("UNLOCKOUT", "UNLOCKOUT", pd.name, pts, "Unlockout final score");
+            if (plugin.server.getPlayerList().getPlayer(e.getKey()) != null) {
+                plugin.notify(e.getKey(), "&a&l+ $" + Fmt.money(pts) + "  &7Unlockout final score  &8|  &a$ &e" + Fmt.money(pd.money), 10);
             }
         }
-        return now;
     }
 
     void join(ServerPlayer p) {
@@ -534,8 +534,7 @@ public final class Unlockout {
         int pts = goalPoints(order.size() - 1);
         int now = award(team, pts);
         String col = Teams.color(team);
-        broadcast(Fmt.PREFIX + " " + col + "&l" + team + " &acompleted &f" + GOALS.get(g).name() + "&a!  &e+" + pts + " pts"
-            + moneyText(pts) + " &8(" + ordinal(order.size()) + " team)  &7» &e" + now + " pts");
+        broadcast(Fmt.PREFIX + " " + col + "&l" + team + " &acompleted &f" + GOALS.get(g).name() + "&a!  &e+" + pts + " pts &8(" + ordinal(order.size()) + " team)  &7» &e" + now + " pts");
         // only lines through this goal can have just become complete
         for (int l = 0; l < LINES.length; l++) {
             boolean full = false;
@@ -547,14 +546,14 @@ public final class Unlockout {
             int lp = Math.max(0, LINE_POINTS - LINE_STEP * (lo.size() - 1));
             now = award(team, lp);
             broadcast("");
-            broadcast(Fmt.PREFIX + " " + col + "&l" + team + " &afinished " + lineName(l) + "&a!  &e+" + lp + " pts" + moneyText(lp)
+            broadcast(Fmt.PREFIX + " " + col + "&l" + team + " &afinished " + lineName(l) + "&a!  &e+" + lp + " pts"
                 + " &8(" + ordinal(lo.size()) + " team)  &7» &e" + now + " pts");
             broadcast("");
         }
         if (doneCount(team) == GOALS.size()) {
             now = award(team, BOARD_POINTS);
             broadcast("");
-            broadcast(Fmt.PREFIX + " " + col + "&l" + team + " &a&lcompleted the entire board!  &e+" + BOARD_POINTS + " pts" + moneyText(BOARD_POINTS) + "  &7» &e" + now + " pts");
+            broadcast(Fmt.PREFIX + " " + col + "&l" + team + " &a&lcompleted the entire board!  &e+" + BOARD_POINTS + " pts" + "  &7» &e" + now + " pts");
             end(col + "&l" + team + " &acleared the board!");
             return;
         }
@@ -564,11 +563,6 @@ public final class Unlockout {
     // what the goal pays a team once `done` teams have already finished it
     private static int goalPoints(int done) {
         return Math.max(0, GOAL_POINTS - GOAL_STEP * done);
-    }
-
-    private String moneyText(int pts) {
-        double money = pts * plugin.config.unlockoutMoneyPerPoint;
-        return money > 0 ? "  &8|  &7+$" + Fmt.money(money) + " &7per member" : "";
     }
 
     private static String lineName(int l) {

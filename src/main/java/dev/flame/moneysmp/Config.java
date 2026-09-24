@@ -30,8 +30,6 @@ final class Config {
     // share of points picked as super each event, and how many times slower they capture
     double controlPointSuperPercent = 25;
     double controlPointSuperSlowdown = 4;
-    // per unlockout point earned (goal, line or full board), paid to every member of the team
-    double unlockoutMoneyPerPoint = 10;
     // why the file couldn't be read, so /moneysmp reload can keep the old settings instead
     transient String error;
 
@@ -69,7 +67,6 @@ final class Config {
             if (y.has("controlPointHeight")) c.controlPointHeight = Math.max(1, y.get("controlPointHeight").getAsInt());
             if (y.has("controlPointSuperPercent")) c.controlPointSuperPercent = Math.max(0, Math.min(100, y.get("controlPointSuperPercent").getAsDouble()));
             if (y.has("controlPointSuperSlowdown")) c.controlPointSuperSlowdown = Math.max(0.01, y.get("controlPointSuperSlowdown").getAsDouble());
-            if (y.has("unlockoutMoneyPerPoint")) c.unlockoutMoneyPerPoint = y.get("unlockoutMoneyPerPoint").getAsDouble();
         } catch (IOException | RuntimeException e) {
             MoneySMP.LOG.error("could not read config.json", e);
             c.error = e.getMessage();
