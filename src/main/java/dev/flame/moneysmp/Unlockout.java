@@ -13,6 +13,7 @@ import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.HoverEvent;
 import net.minecraft.network.chat.MutableComponent;
+import net.minecraft.resources.ResourceKey;
 import net.minecraft.server.level.ServerBossEvent;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
@@ -35,12 +36,12 @@ import net.minecraft.world.entity.monster.Enemy;
 import net.minecraft.world.entity.monster.warden.Warden;
 import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.entity.projectile.ProjectileUtil;
-import net.minecraft.world.entity.raid.Raid;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.item.component.MapItemColor;
 import net.minecraft.world.item.equipment.trim.ArmorTrim;
+import net.minecraft.world.item.equipment.trim.TrimPattern;
 import net.minecraft.world.item.equipment.trim.TrimPatterns;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.saveddata.maps.MapId;
@@ -80,7 +81,7 @@ public final class Unlockout {
     // label is what the map shows: up to three lines of six characters, split on |
     record Goal(String name, String label, Kind kind, int target, String unit) {}
 
-    static final int BOSSES = 0, BREED = 1, SWIM = 2, SNEAK = 3, RAID = 4,
+    static final int BOSSES = 0, BREED = 1, SWIM = 2, SNEAK = 3, BRUSHED = 4,
         FOODS = 5, ELITE = 6, VAULT = 7, VOID = 8, COMPOST = 9,
         HERO = 10, PVP = 11, SPY = 12, RELIC = 13, DEALT = 14,
         CONCRETE = 15, LEASH = 16, DOLPHIN = 17, TRIM = 18, HOSTILE = 19,
@@ -92,7 +93,7 @@ public final class Unlockout {
         new Goal("Breed 20 unique mobs", "BREED|20|MOBS", Kind.SET, 20, "mobs"),
         new Goal("Swim 15,000 blocks", "SWIM|15000|BLOCKS", Kind.COUNT, 15_000, "blocks"),
         new Goal("Sneak 10,000 blocks", "SNEAK|10000|BLOCKS", Kind.COUNT, 10_000, "blocks"),
-        new Goal("Win a level-5 ominous raid", "WIN|LVL 5|RAID", Kind.FLAG, 1, ""),
+        new Goal("Wear all four armor trims from brushing at once", "4 BRSH|TRIMS|WORN", Kind.FLAG, 1, ""),
         new Goal("Eat 30 different foods", "EAT 30|FOODS|", Kind.SET, 30, "foods"),
         new Goal("Kill an evoker, ravager, piglin brute and elder guardian", "KILL|ELITE|MOBS", Kind.SET, 4, "mobs"),
         new Goal("Unlock 10 unique ominous vaults", "UNLOCK|10 OMN|VAULTS", Kind.SET, 10, "vaults"),
@@ -134,8 +135,6 @@ public final class Unlockout {
 
     // the mixins have no handle on the mod, so the live instance parks itself here
     static Unlockout hooks;
-    // Raid.tick sets this before it fires RAID_WIN, so the trigger can see the omen level
-    public static Raid tickingRaid;
 
     private final MoneySMP plugin;
     private Path file;
@@ -398,6 +397,7 @@ public final class Unlockout {
             for (Leashable l : Leashable.leashableLeashedTo(p)) if (l instanceof Mob m) held.add(key(m.getType()));
             if (held.size() >= 20) flag(team, LEASH);
             if (silenceSet(p)) flag(team, TRIM);
+            if (brushedSet(p)) flag(team, BRUSHED);
             if (p.getActiveEffects().size() >= 15) flag(team, EFFECTS);
             MobEffectInstance haste = p.getEffect(MobEffects.HASTE);
             if (haste != null && haste.getAmplifier() >= 1 && p.hasEffect(MobEffects.CONDUIT_POWER)) flag(team, CONDUIT);
@@ -444,6 +444,16 @@ public final class Unlockout {
             if (trim == null || !trim.pattern().is(TrimPatterns.SILENCE)) return false;
         }
         return true;
+    }
+
+    // the only trims archaeology gives, all from trail ruins. one on each piece covers all four
+    private static boolean brushedSet(ServerPlayer p) {
+        Set<ResourceKey<TrimPattern>> want = new HashSet<>(List.of(TrimPatterns.WAYFINDER, TrimPatterns.RAISER, TrimPatterns.SHAPER, TrimPatterns.HOST));
+        for (EquipmentSlot slot : new EquipmentSlot[]{EquipmentSlot.HEAD, EquipmentSlot.CHEST, EquipmentSlot.LEGS, EquipmentSlot.FEET}) {
+            ArmorTrim trim = p.getItemBySlot(slot).get(DataComponents.TRIM);
+            if (trim != null) trim.pattern().unwrapKey().ifPresent(want::remove);
+        }
+        return want.isEmpty();
     }
 
     private void updateBar() {
@@ -660,7 +670,6 @@ public final class Unlockout {
     public static void raidWon(ServerPlayer p) {
         String team = teamOf(p);
         if (team != null) hooks.heroAt.put(p.getUUID(), System.currentTimeMillis());
-        if (team != null && tickingRaid != null && tickingRaid.getRaidOmenLevel() >= 5) hooks.flag(team, RAID);
     }
 
     public static void inventoryChanged(ServerPlayer p, ItemStack stack) {

@@ -12,7 +12,6 @@
     "LivingEntityMixin",
     "PlayerInteractTriggerMixin",
     "PlayerTriggerMixin",
-    "RaidMixin",
     "UsingItemTriggerMixin",
     "VaultBlockEntityServerMixin"
   ],
