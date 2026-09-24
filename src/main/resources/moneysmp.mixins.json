@@ -7,12 +7,12 @@
     "BredAnimalsTriggerMixin",
     "ComposterBlockMixin",
     "ConsumeItemTriggerMixin",
+    "DolphinMixin",
     "InventoryChangeTriggerMixin",
     "LivingEntityMixin",
     "PlayerInteractTriggerMixin",
     "PlayerTriggerMixin",
     "RaidMixin",
-    "SummonedEntityTriggerMixin",
     "UsingItemTriggerMixin",
     "VaultBlockEntityServerMixin"
   ],

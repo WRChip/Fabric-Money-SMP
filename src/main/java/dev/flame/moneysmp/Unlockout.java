@@ -19,6 +19,8 @@ import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.stats.Stats;
 import net.minecraft.world.BossEvent;
 import net.minecraft.world.damagesource.DamageSource;
+import net.minecraft.world.damagesource.DamageTypes;
+import net.minecraft.world.effect.MobEffectInstance;
 import net.minecraft.world.effect.MobEffects;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntityType;
@@ -28,12 +30,11 @@ import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.Mob;
 import net.minecraft.world.entity.animal.Animal;
 import net.minecraft.world.entity.boss.wither.WitherBoss;
+import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.entity.monster.Enemy;
-import net.minecraft.world.entity.monster.breeze.Breeze;
 import net.minecraft.world.entity.monster.warden.Warden;
 import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.entity.projectile.ProjectileUtil;
-import net.minecraft.world.entity.projectile.hurtingprojectile.windcharge.AbstractWindCharge;
 import net.minecraft.world.entity.raid.Raid;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
@@ -79,15 +80,15 @@ public final class Unlockout {
     // label is what the map shows: up to three lines of six characters, split on |
     record Goal(String name, String label, Kind kind, int target, String unit) {}
 
-    static final int WARDEN = 0, BREED = 1, SWIM = 2, SNEAK = 3, RAID = 4,
-        FOODS = 5, ELITE = 6, VAULT = 7, WITHER = 8, COMPOST = 9,
-        BREEZE = 10, PVP = 11, SPY = 12, RELIC = 13, DEALT = 14,
-        CONCRETE = 15, LEASH = 16, ARMOR = 17, TRIM = 18, HOSTILE = 19,
+    static final int BOSSES = 0, BREED = 1, SWIM = 2, SNEAK = 3, RAID = 4,
+        FOODS = 5, ELITE = 6, VAULT = 7, VOID = 8, COMPOST = 9,
+        HERO = 10, PVP = 11, SPY = 12, RELIC = 13, DEALT = 14,
+        CONCRETE = 15, LEASH = 16, DOLPHIN = 17, TRIM = 18, HOSTILE = 19,
         SPRINT = 20, EFFECTS = 21, CONDUIT = 22, TAKEN = 23, NAMED = 24;
 
     // tuned for a team of three to need about a day. nothing here needs the End
     static final List<Goal> GOALS = List.of(
-        new Goal("Kill the Warden", "KILL|THE|WARDEN", Kind.FLAG, 1, ""),
+        new Goal("Kill a Wither, an Elder Guardian and a Warden", "WITHER|GUARDN|WARDEN", Kind.SET, 3, "mobs"),
         new Goal("Breed 20 unique mobs", "BREED|20|MOBS", Kind.SET, 20, "mobs"),
         new Goal("Swim 15,000 blocks", "SWIM|15000|BLOCKS", Kind.COUNT, 15_000, "blocks"),
         new Goal("Sneak 10,000 blocks", "SNEAK|10000|BLOCKS", Kind.COUNT, 10_000, "blocks"),
@@ -95,21 +96,21 @@ public final class Unlockout {
         new Goal("Eat 30 different foods", "EAT 30|FOODS|", Kind.SET, 30, "foods"),
         new Goal("Kill an evoker, ravager, piglin brute and elder guardian", "KILL|ELITE|MOBS", Kind.SET, 4, "mobs"),
         new Goal("Unlock 10 unique ominous vaults", "UNLOCK|10 OMN|VAULTS", Kind.SET, 10, "vaults"),
-        new Goal("Summon and kill the Wither", "KILL|THE|WITHER", Kind.FLAG, 1, ""),
+        new Goal("Die to the void", "DIE TO|THE|VOID", Kind.FLAG, 1, ""),
         new Goal("Compost 11 types of edible food", "COMPST|11|FOODS", Kind.SET, 11, "foods"),
-        new Goal("Kill a Breeze with a wind charge", "BREEZE|WIND|CHARGE", Kind.FLAG, 1, ""),
+        new Goal("Get Hero of the Village, then die to the Warden within 30s", "HERO|THEN|WARDEN", Kind.FLAG, 1, ""),
         new Goal("Kill a player from 3 different opposing teams", "KILL|PLAYER|3TEAMS", Kind.SET, 3, "teams"),
         new Goal("Spy on 40 different mobs with a spyglass", "SPY|40|MOBS", Kind.SET, 40, "mobs"),
         new Goal("Relic disc from trail ruins", "RELIC|DISC|", Kind.FLAG, 1, ""),
         new Goal("Deal 1,000,000 damage", "DEAL|1M|DAMAGE", Kind.COUNT, 1_000_000, "damage"),
         new Goal("1,024 red concrete", "1024|RED|CONCRT", Kind.COUNT, 1024, "red concrete"),
         new Goal("Have 20 unique mobs on one player's leashes at the same time", "20 MOB|LEASHD|ONCE", Kind.FLAG, 1, ""),
-        new Goal("Wear a full set of netherite armor", "WEAR|NETHRT|ARMOR", Kind.FLAG, 1, ""),
+        new Goal("Give a dolphin a netherite block", "DOLPHN|NETHRT|BLOCK", Kind.FLAG, 1, ""),
         new Goal("Apply the silence trim to your entire armor", "SILNCE|TRIM|ARMOR", Kind.FLAG, 1, ""),
         new Goal("Kill 28 different hostile mob types", "KILL|28 MOB|TYPES", Kind.SET, 28, "types"),
         new Goal("Sprint 40,000 blocks", "SPRINT|40000|BLOCKS", Kind.COUNT, 40_000, "blocks"),
         new Goal("15 effects active at once", "15|EFFCTS|ACTIVE", Kind.FLAG, 1, ""),
-        new Goal("Active conduit", "ACTIVE|CONDUT|", Kind.FLAG, 1, ""),
+        new Goal("Have Haste II and conduit power at the same time", "HASTE2|CONDUT|POWER", Kind.FLAG, 1, ""),
         new Goal("Take 20,000 damage", "TAKE|20000|DAMAGE", Kind.COUNT, 20_000, "damage"),
         new Goal("Rename a ghast, iron golem, elder guardian and wither Dinnerbone", "DINNER|BONE|4 MOBS", Kind.SET, 4, "mobs"));
 
@@ -149,6 +150,8 @@ public final class Unlockout {
     private final Map<String, Map<Integer, Progress>> progress = new HashMap<>();
     // base then last reading for sneak, sprint and swim, in cm. base is -1 until first seen
     private final Map<UUID, long[]> stats = new HashMap<>();
+    // when each player last won a raid, for the hero-then-warden goal. only needs 30s of memory
+    private final Map<UUID, Long> heroAt = new HashMap<>();
     // one board per team, "" for players without one
     final Map<String, MapId> maps = new HashMap<>();
     private final ServerBossEvent bar = new ServerBossEvent(Component.empty(), BossEvent.BossBarColor.GREEN, BossEvent.BossBarOverlay.PROGRESS);
@@ -394,10 +397,10 @@ public final class Unlockout {
             Set<String> held = new HashSet<>();
             for (Leashable l : Leashable.leashableLeashedTo(p)) if (l instanceof Mob m) held.add(key(m.getType()));
             if (held.size() >= 20) flag(team, LEASH);
-            if (netheriteSet(p)) flag(team, ARMOR);
             if (silenceSet(p)) flag(team, TRIM);
             if (p.getActiveEffects().size() >= 15) flag(team, EFFECTS);
-            if (p.hasEffect(MobEffects.CONDUIT_POWER)) flag(team, CONDUIT);
+            MobEffectInstance haste = p.getEffect(MobEffects.HASTE);
+            if (haste != null && haste.getAmplifier() >= 1 && p.hasEffect(MobEffects.CONDUIT_POWER)) flag(team, CONDUIT);
             concrete.merge(team, p.getInventory().countItem(Items.RED_CONCRETE), Integer::sum);
             if (!running) return;
         }
@@ -441,13 +444,6 @@ public final class Unlockout {
             if (trim == null || !trim.pattern().is(TrimPatterns.SILENCE)) return false;
         }
         return true;
-    }
-
-    private static boolean netheriteSet(ServerPlayer p) {
-        return p.getItemBySlot(EquipmentSlot.HEAD).is(Items.NETHERITE_HELMET)
-            && p.getItemBySlot(EquipmentSlot.CHEST).is(Items.NETHERITE_CHESTPLATE)
-            && p.getItemBySlot(EquipmentSlot.LEGS).is(Items.NETHERITE_LEGGINGS)
-            && p.getItemBySlot(EquipmentSlot.FEET).is(Items.NETHERITE_BOOTS);
     }
 
     private void updateBar() {
@@ -596,6 +592,14 @@ public final class Unlockout {
 
     void onDeath(LivingEntity victim, DamageSource source) {
         if (!running) return;
+        if (victim instanceof ServerPlayer v && team(v) != null) {
+            String vt = team(v);
+            // /kill is generic_kill, so only actually falling out of the world counts
+            if (source.is(DamageTypes.FELL_OUT_OF_WORLD)) flag(vt, VOID);
+            Long won = heroAt.get(v.getUUID());
+            if (source.getEntity() instanceof Warden && won != null && System.currentTimeMillis() - won <= 30_000) flag(vt, HERO);
+            if (!running) return;
+        }
         ServerPlayer killer = source.getEntity() instanceof ServerPlayer sp ? sp
             : victim.getKillCredit() instanceof ServerPlayer sp ? sp : null;
         if (killer == null || killer == victim) return;
@@ -608,9 +612,7 @@ public final class Unlockout {
         }
         String type = key(victim.getType());
         if (victim instanceof Enemy) item(team, HOSTILE, type);
-        if (victim instanceof Warden) flag(team, WARDEN);
-        if (victim instanceof WitherBoss && prog(team, WITHER).items.contains(victim.getUUID().toString())) flag(team, WITHER);
-        if (victim instanceof Breeze && source.getDirectEntity() instanceof AbstractWindCharge) flag(team, BREEZE);
+        if (victim instanceof Warden || victim instanceof WitherBoss || victim.getType() == EntityType.ELDER_GUARDIAN) item(team, BOSSES, type);
         if (victim.getType() == EntityType.EVOKER || victim.getType() == EntityType.RAVAGER
             || victim.getType() == EntityType.PIGLIN_BRUTE || victim.getType() == EntityType.ELDER_GUARDIAN) {
             item(team, ELITE, type);
@@ -657,13 +659,8 @@ public final class Unlockout {
 
     public static void raidWon(ServerPlayer p) {
         String team = teamOf(p);
+        if (team != null) hooks.heroAt.put(p.getUUID(), System.currentTimeMillis());
         if (team != null && tickingRaid != null && tickingRaid.getRaidOmenLevel() >= 5) hooks.flag(team, RAID);
-    }
-
-    public static void summoned(ServerPlayer p, Entity e) {
-        String team = teamOf(p);
-        if (team == null || !(e instanceof WitherBoss) || hooks.isDone(team, WITHER)) return;
-        if (hooks.prog(team, WITHER).items.add(e.getUUID().toString())) hooks.save();
     }
 
     public static void inventoryChanged(ServerPlayer p, ItemStack stack) {
@@ -681,6 +678,14 @@ public final class Unlockout {
     }
 
     // counted per vault, so several teammates opening the same one only count once
+    // dolphins take items by picking them up, so it goes to whoever threw the block
+    public static void dolphinTook(ItemEntity item) {
+        if (item.getOwner() instanceof ServerPlayer p && item.getItem().is(Items.NETHERITE_BLOCK)) {
+            String team = teamOf(p);
+            if (team != null) hooks.flag(team, DOLPHIN);
+        }
+    }
+
     public static void vaultOpened(ServerPlayer p, BlockPos pos, boolean ominous) {
         String team = teamOf(p);
         if (team != null && ominous) hooks.item(team, VAULT, p.level().dimension().identifier().getPath() + " " + pos.toShortString());
@@ -789,7 +794,7 @@ public final class Unlockout {
         Map<Integer, Progress> goals = progress.get(team);
         Progress p = goals == null ? null : goals.get(g);
         return switch (goal.kind()) {
-            case FLAG -> g == WITHER && p != null && !p.items.isEmpty() ? "&esummoned, now kill it" : "&7not yet";
+            case FLAG -> "&7not yet";
             case SET -> {
                 int n = p == null ? 0 : p.items.size();
                 StringBuilder sb = new StringBuilder("&e" + n + "&7/" + goal.target() + " " + goal.unit());
