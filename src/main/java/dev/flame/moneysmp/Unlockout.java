@@ -59,15 +59,16 @@ import java.util.Set;
 import java.util.UUID;
 
 // 5x5 goal board every team races on at once. unlike lockout a goal never locks: each team
-// can still finish it, just for fewer points the later they get there (5 4 3 2 1 0, and
-// 15 12 9 6 3 0 for a full row, column or diagonal). the first full board is +200 and ends
+// can still finish it, just for fewer points the later they get there (10 8 6 4 2 0, and
+// 30 24 18 12 6 0 for a full row, column or diagonal). the first full board is +600 and ends
 // it, otherwise the time limit does. everyone carries a map of the board that is redrawn
 // once a second. progress is shared by the whole team. ticked once a second by MoneySMP
 public final class Unlockout {
-    static final int GOAL_POINTS = 5;
-    static final int LINE_POINTS = 15;
-    static final int LINE_STEP = 3;
-    static final int BOARD_POINTS = 200;
+    static final int GOAL_POINTS = 10;
+    static final int GOAL_STEP = 2;
+    static final int LINE_POINTS = 30;
+    static final int LINE_STEP = 6;
+    static final int BOARD_POINTS = 600;
     private static final long[] WARNINGS = {3600, 1800, 600, 300, 60, 10};
     private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
 
@@ -299,7 +300,7 @@ public final class Unlockout {
         broadcast("");
         broadcast(Fmt.PREFIX + " &a&l⚑ UNLOCKOUT STARTED ⚑");
         broadcast("  &7Complete goals on the board for your team. First team to a goal gets &e" + GOAL_POINTS
-            + " pts&7, then one less each; a full row, column or diagonal is &e" + LINE_POINTS + " pts &7and down by " + LINE_STEP + ".");
+            + " pts&7, then " + GOAL_STEP + " less each; a full row, column or diagonal is &e" + LINE_POINTS + " pts &7and down by " + LINE_STEP + ".");
         broadcast("  &7The whole board is worth &e+" + BOARD_POINTS + " &7and ends it"
             + (seconds > 0 ? ", otherwise it ends in &f" + Fmt.timeAgo(seconds) + "&7." : "."));
         if (plugin.config.unlockoutMoneyPerPoint > 0) {
@@ -518,7 +519,7 @@ public final class Unlockout {
         if (!running) return;
         List<String> order = done.computeIfAbsent(g, k -> new ArrayList<>());
         order.add(team);
-        int pts = Math.max(0, GOAL_POINTS - (order.size() - 1));
+        int pts = goalPoints(order.size() - 1);
         int now = award(team, pts);
         String col = Teams.color(team);
         broadcast(Fmt.PREFIX + " " + col + "&l" + team + " &acompleted &f" + GOALS.get(g).name() + "&a!  &e+" + pts + " pts"
@@ -546,6 +547,11 @@ public final class Unlockout {
             return;
         }
         save();
+    }
+
+    // what the goal pays a team once `done` teams have already finished it
+    private static int goalPoints(int done) {
+        return Math.max(0, GOAL_POINTS - GOAL_STEP * done);
     }
 
     private String moneyText(int pts) {
@@ -734,7 +740,7 @@ public final class Unlockout {
                 MutableComponent row = Component.literal("   ");
                 for (int c = 0; c < 5; c++) {
                     int g = r * 5 + c;
-                    int left = Math.max(0, GOAL_POINTS - doneOrder(g).size());
+                    int left = goalPoints(doneOrder(g).size());
                     String cell = team != null && isDone(team, g) ? Teams.color(team) + "&l[✔]" : left == 0 ? "&8[0]" : "&f[&e" + left + "&f]";
                     row.append(Fmt.c(cell + " ").withStyle(st -> st.withHoverEvent(new HoverEvent.ShowText(Fmt.c(detail(team, g))))));
                 }
@@ -762,9 +768,9 @@ public final class Unlockout {
         List<String> order = doneOrder(g);
         for (int i = 0; i < order.size(); i++) {
             sb.append("\n&8").append(ordinal(i + 1)).append(' ').append(Teams.color(order.get(i))).append(order.get(i))
-                .append(" &e+").append(Math.max(0, GOAL_POINTS - i));
+                .append(" &e+").append(goalPoints(i));
         }
-        sb.append("\n&7Next team: &e+").append(Math.max(0, GOAL_POINTS - order.size()));
+        sb.append("\n&7Next team: &e+").append(goalPoints(order.size()));
         return sb.toString();
     }
 
