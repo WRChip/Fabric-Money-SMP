@@ -23,6 +23,7 @@ import net.minecraft.world.effect.MobEffects;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.EquipmentSlot;
+import net.minecraft.world.entity.Leashable;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.Mob;
 import net.minecraft.world.entity.animal.Animal;
@@ -52,6 +53,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -80,7 +82,7 @@ public final class Unlockout {
     static final int WARDEN = 0, BREED = 1, SWIM = 2, SNEAK = 3, RAID = 4,
         FOODS = 5, ELITE = 6, VAULT = 7, WITHER = 8, COMPOST = 9,
         BREEZE = 10, PVP = 11, SPY = 12, RELIC = 13, DEALT = 14,
-        CONCRETE = 15, LEVEL = 16, ARMOR = 17, TRIM = 18, HOSTILE = 19,
+        CONCRETE = 15, LEASH = 16, ARMOR = 17, TRIM = 18, HOSTILE = 19,
         SPRINT = 20, EFFECTS = 21, CONDUIT = 22, TAKEN = 23, NAMED = 24;
 
     // tuned for a team of three to need about a day. nothing here needs the End
@@ -101,7 +103,7 @@ public final class Unlockout {
         new Goal("Relic disc from trail ruins", "RELIC|DISC|", Kind.FLAG, 1, ""),
         new Goal("Deal 1,000,000 damage", "DEAL|1M|DAMAGE", Kind.COUNT, 1_000_000, "damage"),
         new Goal("1,024 red concrete", "1024|RED|CONCRT", Kind.COUNT, 1024, "red concrete"),
-        new Goal("Reach XP level 267", "REACH|LEVEL|267", Kind.FLAG, 1, ""),
+        new Goal("Have 20 unique mobs on one player's leashes at the same time", "20 MOB|LEASHD|ONCE", Kind.FLAG, 1, ""),
         new Goal("Wear a full set of netherite armor", "WEAR|NETHRT|ARMOR", Kind.FLAG, 1, ""),
         new Goal("Apply the silence trim to your entire armor", "SILNCE|TRIM|ARMOR", Kind.FLAG, 1, ""),
         new Goal("Kill 28 different hostile mob types", "KILL|28 MOB|TYPES", Kind.SET, 28, "types"),
@@ -109,7 +111,7 @@ public final class Unlockout {
         new Goal("15 effects active at once", "15|EFFCTS|ACTIVE", Kind.FLAG, 1, ""),
         new Goal("Active conduit", "ACTIVE|CONDUT|", Kind.FLAG, 1, ""),
         new Goal("Take 20,000 damage", "TAKE|20000|DAMAGE", Kind.COUNT, 20_000, "damage"),
-        new Goal("Rename 3 different hostile mobs Dinnerbone", "DINNER|BONE 3|MOBS", Kind.SET, 3, "mobs"));
+        new Goal("Rename a ghast, iron golem, elder guardian and wither Dinnerbone", "DINNER|BONE|4 MOBS", Kind.SET, 4, "mobs"));
 
     // rows, columns, then the two diagonals
     static final int[][] LINES = new int[12][5];
@@ -387,7 +389,11 @@ public final class Unlockout {
             sample(p);
             String team = team(p);
             if (team == null || p.isSpectator()) continue;
-            if (p.experienceLevel >= 267) flag(team, LEVEL);
+            // one player has to hold them all. only mobs count: boats can be leashed too but are
+            // vehicles, and hostile mobs can't be leashed at all
+            Set<String> held = new HashSet<>();
+            for (Leashable l : Leashable.leashableLeashedTo(p)) if (l instanceof Mob m) held.add(key(m.getType()));
+            if (held.size() >= 20) flag(team, LEASH);
             if (netheriteSet(p)) flag(team, ARMOR);
             if (silenceSet(p)) flag(team, TRIM);
             if (p.getActiveEffects().size() >= 15) flag(team, EFFECTS);
@@ -667,9 +673,11 @@ public final class Unlockout {
 
     public static void interacted(ServerPlayer p, ItemStack stack, Entity target) {
         String team = teamOf(p);
-        if (team == null || !stack.is(Items.NAME_TAG) || !(target instanceof Enemy)) return;
+        if (team == null || !stack.is(Items.NAME_TAG)) return;
+        EntityType<?> type = target.getType();
+        if (type != EntityType.GHAST && type != EntityType.IRON_GOLEM && type != EntityType.ELDER_GUARDIAN && type != EntityType.WITHER) return;
         Component name = stack.get(DataComponents.CUSTOM_NAME);
-        if (name != null && name.getString().equals("Dinnerbone")) hooks.item(team, NAMED, key(target.getType()));
+        if (name != null && name.getString().equals("Dinnerbone")) hooks.item(team, NAMED, key(type));
     }
 
     // counted per vault, so several teammates opening the same one only count once
