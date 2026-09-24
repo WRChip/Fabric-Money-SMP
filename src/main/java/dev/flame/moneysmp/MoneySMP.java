@@ -79,7 +79,6 @@ public final class MoneySMP implements ModInitializer {
             if (entity instanceof ServerPlayer victim) onDeath(victim);
             unlockout.onDeath(entity, source);
         });
-        ServerLivingEntityEvents.MOB_CONVERSION.register((from, to, params) -> unlockout.onConversion(from, to));
         // the client keeps its waypoints across respawns and dimension changes, so resend
         // (or clear) ours whenever vanilla would have resent the player ones
         ServerPlayerEvents.AFTER_RESPAWN.register((old, p, alive) -> {

@@ -7,6 +7,7 @@ import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import net.minecraft.commands.CommandSourceStack;
+import net.minecraft.core.BlockPos;
 import net.minecraft.core.component.DataComponents;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.network.chat.Component;
@@ -22,15 +23,13 @@ import net.minecraft.world.damagesource.DamageSource;
 import net.minecraft.world.effect.MobEffects;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntityType;
+import net.minecraft.world.entity.EquipmentSlot;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.Mob;
 import net.minecraft.world.entity.animal.Animal;
 import net.minecraft.world.entity.boss.wither.WitherBoss;
 import net.minecraft.world.entity.monster.Enemy;
-import net.minecraft.world.entity.monster.Ghast;
-import net.minecraft.world.entity.monster.Zoglin;
 import net.minecraft.world.entity.monster.breeze.Breeze;
-import net.minecraft.world.entity.monster.hoglin.Hoglin;
 import net.minecraft.world.entity.monster.warden.Warden;
 import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.entity.projectile.ProjectileUtil;
@@ -70,7 +69,6 @@ public final class Unlockout {
     static final int LINE_STEP = 3;
     static final int BOARD_POINTS = 200;
     private static final long[] WARNINGS = {3600, 1800, 600, 300, 60, 10};
-    private static final String ZOGLIN_TAG = "moneysmp_zoglin";
     private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
 
     enum Kind { FLAG, SET, COUNT }
@@ -78,38 +76,39 @@ public final class Unlockout {
     // label is what the map shows: up to three lines of six characters, split on |
     record Goal(String name, String label, Kind kind, int target, String unit) {}
 
-    static final int WARDEN = 0, BREED = 1, Y320 = 2, SNEAK = 3, RAID = 4,
+    static final int WARDEN = 0, BREED = 1, SWIM = 2, SNEAK = 3, RAID = 4,
         FOODS = 5, ELITE = 6, VAULT = 7, WITHER = 8, COMPOST = 9,
         BREEZE = 10, PVP = 11, SPY = 12, RELIC = 13, DEALT = 14,
-        CONCRETE = 15, HUNGER = 16, ZOGLIN = 17, COMPASS = 18, HOSTILE = 19,
-        SPRINT = 20, EFFECTS = 21, CONDUIT = 22, TAKEN = 23, GHAST = 24;
+        CONCRETE = 15, LEVEL = 16, ARMOR = 17, COMPASS = 18, HOSTILE = 19,
+        SPRINT = 20, EFFECTS = 21, CONDUIT = 22, TAKEN = 23, NAMED = 24;
 
+    // tuned for a team of three to need about a day. nothing here needs the End
     static final List<Goal> GOALS = List.of(
         new Goal("Kill the Warden", "KILL|THE|WARDEN", Kind.FLAG, 1, ""),
-        new Goal("Breed 10 unique mobs", "BREED|10|MOBS", Kind.SET, 10, "mobs"),
-        new Goal("Reach y=320", "REACH|Y=320|", Kind.FLAG, 1, ""),
-        new Goal("Sneak 500 blocks", "SNEAK|500|BLOCKS", Kind.COUNT, 500, "blocks"),
+        new Goal("Breed 20 unique mobs", "BREED|20|MOBS", Kind.SET, 20, "mobs"),
+        new Goal("Swim 15,000 blocks", "SWIM|15000|BLOCKS", Kind.COUNT, 15_000, "blocks"),
+        new Goal("Sneak 10,000 blocks", "SNEAK|10000|BLOCKS", Kind.COUNT, 10_000, "blocks"),
         new Goal("Win a level-5 ominous raid", "WIN|LVL 5|RAID", Kind.FLAG, 1, ""),
-        new Goal("Eat 15 different foods", "EAT 15|FOODS|", Kind.SET, 15, "foods"),
+        new Goal("Eat 30 different foods", "EAT 30|FOODS|", Kind.SET, 30, "foods"),
         new Goal("Kill an evoker, ravager, piglin brute and elder guardian", "KILL|ELITE|MOBS", Kind.SET, 4, "mobs"),
-        new Goal("Open an ominous vault", "OPEN|OMINUS|VAULT", Kind.FLAG, 1, ""),
+        new Goal("Open 3 different ominous vaults", "OPEN 3|OMINUS|VAULTS", Kind.SET, 3, "vaults"),
         new Goal("Summon and kill the Wither", "KILL|THE|WITHER", Kind.FLAG, 1, ""),
-        new Goal("Compost 7 types of edible food", "COMPST|7|FOODS", Kind.SET, 7, "foods"),
+        new Goal("Compost 11 types of edible food", "COMPST|11|FOODS", Kind.SET, 11, "foods"),
         new Goal("Kill a Breeze with a wind charge", "BREEZE|WIND|CHARGE", Kind.FLAG, 1, ""),
-        new Goal("Kill a player from 2 different opposing teams", "KILL|PLAYER|2TEAMS", Kind.SET, 2, "teams"),
-        new Goal("Spy on 25 different mobs with a spyglass", "SPY|25|MOBS", Kind.SET, 25, "mobs"),
+        new Goal("Kill a player from 3 different opposing teams", "KILL|PLAYER|3TEAMS", Kind.SET, 3, "teams"),
+        new Goal("Spy on 40 different mobs with a spyglass", "SPY|40|MOBS", Kind.SET, 40, "mobs"),
         new Goal("Relic disc from trail ruins", "RELIC|DISC|", Kind.FLAG, 1, ""),
         new Goal("Deal 1,000,000 damage", "DEAL|1M|DAMAGE", Kind.COUNT, 1_000_000, "damage"),
-        new Goal("320 red concrete", "320|RED|CONCRT", Kind.COUNT, 320, "red concrete"),
-        new Goal("Empty your hunger bar to zero", "EMPTY|HUNGER|BAR", Kind.FLAG, 1, ""),
-        new Goal("Hoglin → zoglin, then kill it", "HOGLIN|ZOGLIN|KILL", Kind.FLAG, 1, ""),
-        new Goal("Craft a recovery compass", "CRAFT|RECOVR|COMPAS", Kind.FLAG, 1, ""),
-        new Goal("Kill 15 different hostile mob types", "KILL|15 MOB|TYPES", Kind.SET, 15, "types"),
-        new Goal("Sprint 1,000 blocks", "SPRINT|1000|BLOCKS", Kind.COUNT, 1000, "blocks"),
-        new Goal("10 effects active at once", "10|EFFCTS|ACTIVE", Kind.FLAG, 1, ""),
+        new Goal("1,024 red concrete", "1024|RED|CONCRT", Kind.COUNT, 1024, "red concrete"),
+        new Goal("Reach XP level 70", "REACH|LEVEL|70", Kind.FLAG, 1, ""),
+        new Goal("Wear a full set of netherite armor", "WEAR|NETHRT|ARMOR", Kind.FLAG, 1, ""),
+        new Goal("Craft 3 recovery compasses", "CRFT 3|RECOVR|COMPAS", Kind.COUNT, 3, "compasses"),
+        new Goal("Kill 28 different hostile mob types", "KILL|28 MOB|TYPES", Kind.SET, 28, "types"),
+        new Goal("Sprint 40,000 blocks", "SPRINT|40000|BLOCKS", Kind.COUNT, 40_000, "blocks"),
+        new Goal("15 effects active at once", "15|EFFCTS|ACTIVE", Kind.FLAG, 1, ""),
         new Goal("Active conduit", "ACTIVE|CONDUT|", Kind.FLAG, 1, ""),
-        new Goal("Take 5,000 damage", "TAKE|5000|DAMAGE", Kind.COUNT, 5000, "damage"),
-        new Goal("Rename a ghast Dinnerbone", "GHAST|DINNER|BONE", Kind.FLAG, 1, ""));
+        new Goal("Take 20,000 damage", "TAKE|20000|DAMAGE", Kind.COUNT, 20_000, "damage"),
+        new Goal("Rename 3 different hostile mobs Dinnerbone", "DINNER|BONE 3|MOBS", Kind.SET, 3, "mobs"));
 
     // rows, columns, then the two diagonals
     static final int[][] LINES = new int[12][5];
@@ -145,7 +144,7 @@ public final class Unlockout {
     // over between events
     final Map<String, Integer> score = new HashMap<>();
     private final Map<String, Map<Integer, Progress>> progress = new HashMap<>();
-    // sneak base, sneak last, sprint base, sprint last, all in cm. base -1 until first seen
+    // base then last reading for sneak, sprint and swim, in cm. base is -1 until first seen
     private final Map<UUID, long[]> stats = new HashMap<>();
     // one board per team, "" for players without one
     final Map<String, MapId> maps = new HashMap<>();
@@ -200,8 +199,8 @@ public final class Unlockout {
             }
             for (Map.Entry<String, JsonElement> e : y.getAsJsonObject("stats").entrySet()) {
                 JsonArray arr = e.getValue().getAsJsonArray();
-                long[] v = new long[4];
-                for (int i = 0; i < 4; i++) v[i] = arr.get(i).getAsLong();
+                long[] v = new long[6];
+                for (int i = 0; i < 6; i++) v[i] = arr.get(i).getAsLong();
                 stats.put(UUID.fromString(e.getKey()), v);
             }
             lastLeft = Long.MAX_VALUE;
@@ -387,9 +386,9 @@ public final class Unlockout {
             sample(p);
             String team = team(p);
             if (team == null || p.isSpectator()) continue;
-            if (p.getY() >= 320) flag(team, Y320);
-            if (p.getFoodData().getFoodLevel() <= 0) flag(team, HUNGER);
-            if (p.getActiveEffects().size() >= 10) flag(team, EFFECTS);
+            if (p.experienceLevel >= 70) flag(team, LEVEL);
+            if (netheriteSet(p)) flag(team, ARMOR);
+            if (p.getActiveEffects().size() >= 15) flag(team, EFFECTS);
             if (p.hasEffect(MobEffects.CONDUIT_POWER)) flag(team, CONDUIT);
             concrete.merge(team, p.getInventory().countItem(Items.RED_CONCRETE), Integer::sum);
             if (!running) return;
@@ -400,13 +399,13 @@ public final class Unlockout {
             String t = plugin.data.team(e.getKey());
             if (t == null) continue;
             long[] v = e.getValue();
-            double[] d = dist.computeIfAbsent(t, k -> new double[2]);
-            d[0] += (v[1] - v[0]) / 100.0;
-            d[1] += (v[3] - v[2]) / 100.0;
+            double[] d = dist.computeIfAbsent(t, k -> new double[3]);
+            for (int i = 0; i < 3; i++) d[i] += (v[i * 2 + 1] - v[i * 2]) / 100.0;
         }
         dist.forEach((t, d) -> {
             count(t, SNEAK, d[0]);
             count(t, SPRINT, d[1]);
+            count(t, SWIM, d[2]);
         });
         if (!running) return;
         render();
@@ -415,15 +414,23 @@ public final class Unlockout {
     }
 
     private void sample(ServerPlayer p) {
-        long[] v = stats.computeIfAbsent(p.getUUID(), u -> new long[]{-1, 0, -1, 0});
-        long sneak = p.getStats().getValue(Stats.CUSTOM, Stats.CROUCH_ONE_CM);
-        long sprint = p.getStats().getValue(Stats.CUSTOM, Stats.SPRINT_ONE_CM);
-        if (v[0] < 0) {
-            v[0] = sneak;
-            v[2] = sprint;
+        long[] v = stats.computeIfAbsent(p.getUUID(), u -> new long[]{-1, 0, -1, 0, -1, 0});
+        var st = p.getStats();
+        long[] now = {
+            st.getValue(Stats.CUSTOM, Stats.CROUCH_ONE_CM),
+            st.getValue(Stats.CUSTOM, Stats.SPRINT_ONE_CM),
+            st.getValue(Stats.CUSTOM, Stats.SWIM_ONE_CM)};
+        for (int i = 0; i < 3; i++) {
+            if (v[i * 2] < 0) v[i * 2] = now[i];
+            v[i * 2 + 1] = now[i];
         }
-        v[1] = sneak;
-        v[3] = sprint;
+    }
+
+    private static boolean netheriteSet(ServerPlayer p) {
+        return p.getItemBySlot(EquipmentSlot.HEAD).is(Items.NETHERITE_HELMET)
+            && p.getItemBySlot(EquipmentSlot.CHEST).is(Items.NETHERITE_CHESTPLATE)
+            && p.getItemBySlot(EquipmentSlot.LEGS).is(Items.NETHERITE_LEGGINGS)
+            && p.getItemBySlot(EquipmentSlot.FEET).is(Items.NETHERITE_BOOTS);
     }
 
     private void updateBar() {
@@ -582,7 +589,6 @@ public final class Unlockout {
         if (victim instanceof Warden) flag(team, WARDEN);
         if (victim instanceof WitherBoss && prog(team, WITHER).items.contains(victim.getUUID().toString())) flag(team, WITHER);
         if (victim instanceof Breeze && source.getDirectEntity() instanceof AbstractWindCharge) flag(team, BREEZE);
-        if (victim instanceof Zoglin && victim.getTags().contains(ZOGLIN_TAG)) flag(team, ZOGLIN);
         if (victim.getType() == EntityType.EVOKER || victim.getType() == EntityType.RAVAGER
             || victim.getType() == EntityType.PIGLIN_BRUTE || victim.getType() == EntityType.ELDER_GUARDIAN) {
             item(team, ELITE, type);
@@ -600,10 +606,6 @@ public final class Unlockout {
             String at = hooks.team(a);
             if (at != null) hooks.add(at, DEALT, amount);
         }
-    }
-
-    void onConversion(Mob from, Mob to) {
-        if (running && from instanceof Hoglin && to instanceof Zoglin) to.addTag(ZOGLIN_TAG);
     }
 
     public static void bred(ServerPlayer p, Animal parent) {
@@ -644,7 +646,7 @@ public final class Unlockout {
 
     public static void crafted(ServerPlayer p, ResourceKey<Recipe<?>> recipe) {
         String team = teamOf(p);
-        if (team != null && recipe.identifier().getPath().equals("recovery_compass")) hooks.flag(team, COMPASS);
+        if (team != null && recipe.identifier().getPath().equals("recovery_compass")) hooks.add(team, COMPASS, 1);
     }
 
     public static void inventoryChanged(ServerPlayer p, ItemStack stack) {
@@ -654,14 +656,15 @@ public final class Unlockout {
 
     public static void interacted(ServerPlayer p, ItemStack stack, Entity target) {
         String team = teamOf(p);
-        if (team == null || !stack.is(Items.NAME_TAG) || !(target instanceof Ghast)) return;
+        if (team == null || !stack.is(Items.NAME_TAG) || !(target instanceof Enemy)) return;
         Component name = stack.get(DataComponents.CUSTOM_NAME);
-        if (name != null && name.getString().equals("Dinnerbone")) hooks.flag(team, GHAST);
+        if (name != null && name.getString().equals("Dinnerbone")) hooks.item(team, NAMED, key(target.getType()));
     }
 
-    public static void vaultOpened(ServerPlayer p, boolean ominous) {
+    // counted per vault, so several teammates opening the same one only count once
+    public static void vaultOpened(ServerPlayer p, BlockPos pos, boolean ominous) {
         String team = teamOf(p);
-        if (team != null && ominous) hooks.flag(team, VAULT);
+        if (team != null && ominous) hooks.item(team, VAULT, p.level().dimension().identifier().getPath() + " " + pos.toShortString());
     }
 
     // ── board map ────────────────────────────────────────────────

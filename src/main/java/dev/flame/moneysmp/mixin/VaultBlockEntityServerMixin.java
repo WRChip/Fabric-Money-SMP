@@ -24,6 +24,6 @@ public abstract class VaultBlockEntityServerMixin {
         target = "Lnet/minecraft/world/level/block/entity/vault/VaultServerData;addToRewardedPlayers(Lnet/minecraft/world/entity/player/Player;)V"))
     private static void moneysmp$unlockout(ServerLevel level, BlockPos pos, BlockState state, VaultConfig config, VaultServerData data,
                                            VaultSharedData shared, Player player, ItemStack key, CallbackInfo ci) {
-        if (player instanceof ServerPlayer sp) Unlockout.vaultOpened(sp, state.getValue(VaultBlock.OMINOUS));
+        if (player instanceof ServerPlayer sp) Unlockout.vaultOpened(sp, pos, state.getValue(VaultBlock.OMINOUS));
     }
 }
