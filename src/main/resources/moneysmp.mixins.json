@@ -12,7 +12,6 @@
     "PlayerInteractTriggerMixin",
     "PlayerTriggerMixin",
     "RaidMixin",
-    "RecipeCraftedTriggerMixin",
     "SummonedEntityTriggerMixin",
     "UsingItemTriggerMixin",
     "VaultBlockEntityServerMixin"

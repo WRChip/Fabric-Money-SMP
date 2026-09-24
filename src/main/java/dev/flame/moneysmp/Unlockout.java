@@ -13,7 +13,6 @@ import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.HoverEvent;
 import net.minecraft.network.chat.MutableComponent;
-import net.minecraft.resources.ResourceKey;
 import net.minecraft.server.level.ServerBossEvent;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
@@ -39,7 +38,8 @@ import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.item.component.MapItemColor;
-import net.minecraft.world.item.crafting.Recipe;
+import net.minecraft.world.item.equipment.trim.ArmorTrim;
+import net.minecraft.world.item.equipment.trim.TrimPatterns;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.saveddata.maps.MapId;
 import net.minecraft.world.level.saveddata.maps.MapItemSavedData;
@@ -79,7 +79,7 @@ public final class Unlockout {
     static final int WARDEN = 0, BREED = 1, SWIM = 2, SNEAK = 3, RAID = 4,
         FOODS = 5, ELITE = 6, VAULT = 7, WITHER = 8, COMPOST = 9,
         BREEZE = 10, PVP = 11, SPY = 12, RELIC = 13, DEALT = 14,
-        CONCRETE = 15, LEVEL = 16, ARMOR = 17, COMPASS = 18, HOSTILE = 19,
+        CONCRETE = 15, LEVEL = 16, ARMOR = 17, TRIM = 18, HOSTILE = 19,
         SPRINT = 20, EFFECTS = 21, CONDUIT = 22, TAKEN = 23, NAMED = 24;
 
     // tuned for a team of three to need about a day. nothing here needs the End
@@ -91,7 +91,7 @@ public final class Unlockout {
         new Goal("Win a level-5 ominous raid", "WIN|LVL 5|RAID", Kind.FLAG, 1, ""),
         new Goal("Eat 30 different foods", "EAT 30|FOODS|", Kind.SET, 30, "foods"),
         new Goal("Kill an evoker, ravager, piglin brute and elder guardian", "KILL|ELITE|MOBS", Kind.SET, 4, "mobs"),
-        new Goal("Open 3 different ominous vaults", "OPEN 3|OMINUS|VAULTS", Kind.SET, 3, "vaults"),
+        new Goal("Unlock 10 unique ominous vaults", "UNLOCK|10 OMN|VAULTS", Kind.SET, 10, "vaults"),
         new Goal("Summon and kill the Wither", "KILL|THE|WITHER", Kind.FLAG, 1, ""),
         new Goal("Compost 11 types of edible food", "COMPST|11|FOODS", Kind.SET, 11, "foods"),
         new Goal("Kill a Breeze with a wind charge", "BREEZE|WIND|CHARGE", Kind.FLAG, 1, ""),
@@ -102,7 +102,7 @@ public final class Unlockout {
         new Goal("1,024 red concrete", "1024|RED|CONCRT", Kind.COUNT, 1024, "red concrete"),
         new Goal("Reach XP level 70", "REACH|LEVEL|70", Kind.FLAG, 1, ""),
         new Goal("Wear a full set of netherite armor", "WEAR|NETHRT|ARMOR", Kind.FLAG, 1, ""),
-        new Goal("Craft 3 recovery compasses", "CRFT 3|RECOVR|COMPAS", Kind.COUNT, 3, "compasses"),
+        new Goal("Apply the silence trim to your entire armor", "SILNCE|TRIM|ARMOR", Kind.FLAG, 1, ""),
         new Goal("Kill 28 different hostile mob types", "KILL|28 MOB|TYPES", Kind.SET, 28, "types"),
         new Goal("Sprint 40,000 blocks", "SPRINT|40000|BLOCKS", Kind.COUNT, 40_000, "blocks"),
         new Goal("15 effects active at once", "15|EFFCTS|ACTIVE", Kind.FLAG, 1, ""),
@@ -388,6 +388,7 @@ public final class Unlockout {
             if (team == null || p.isSpectator()) continue;
             if (p.experienceLevel >= 70) flag(team, LEVEL);
             if (netheriteSet(p)) flag(team, ARMOR);
+            if (silenceSet(p)) flag(team, TRIM);
             if (p.getActiveEffects().size() >= 15) flag(team, EFFECTS);
             if (p.hasEffect(MobEffects.CONDUIT_POWER)) flag(team, CONDUIT);
             concrete.merge(team, p.getInventory().countItem(Items.RED_CONCRETE), Integer::sum);
@@ -424,6 +425,15 @@ public final class Unlockout {
             if (v[i * 2] < 0) v[i * 2] = now[i];
             v[i * 2 + 1] = now[i];
         }
+    }
+
+    // worn armor, so it has to be on the player and all four pieces carry the trim
+    private static boolean silenceSet(ServerPlayer p) {
+        for (EquipmentSlot slot : new EquipmentSlot[]{EquipmentSlot.HEAD, EquipmentSlot.CHEST, EquipmentSlot.LEGS, EquipmentSlot.FEET}) {
+            ArmorTrim trim = p.getItemBySlot(slot).get(DataComponents.TRIM);
+            if (trim == null || !trim.pattern().is(TrimPatterns.SILENCE)) return false;
+        }
+        return true;
     }
 
     private static boolean netheriteSet(ServerPlayer p) {
@@ -642,11 +652,6 @@ public final class Unlockout {
         String team = teamOf(p);
         if (team == null || !(e instanceof WitherBoss) || hooks.isDone(team, WITHER)) return;
         if (hooks.prog(team, WITHER).items.add(e.getUUID().toString())) hooks.save();
-    }
-
-    public static void crafted(ServerPlayer p, ResourceKey<Recipe<?>> recipe) {
-        String team = teamOf(p);
-        if (team != null && recipe.identifier().getPath().equals("recovery_compass")) hooks.add(team, COMPASS, 1);
     }
 
     public static void inventoryChanged(ServerPlayer p, ItemStack stack) {
