@@ -57,7 +57,6 @@ import net.minecraft.world.item.Items;
 import net.minecraft.world.item.component.CustomData;
 import net.minecraft.world.item.component.DamageResistant;
 import net.minecraft.world.item.component.ItemLore;
-import net.minecraft.world.item.component.ResolvableProfile;
 import net.minecraft.world.item.enchantment.Enchantment;
 import net.minecraft.world.item.enchantment.Enchantments;
 import net.minecraft.world.item.equipment.EquipmentAsset;
@@ -192,19 +191,37 @@ public final class Legends {
         "emerald_leggings", EquipmentSlot.LEGS, "emerald_boots", EquipmentSlot.FEET);
     private static final ResourceKey<EquipmentAsset> EMERALD = ResourceKey.create(EquipmentAssets.ROOT_ID, Identifier.fromNamespaceAndPath("moneysmp", "emerald"));
 
-    // one line of an altar's recipe: a vanilla item, a legendary part, or player heads
+    // one line of an altar's recipe: a vanilla item, a legendary part, or player heads. heads
+    // count for any team but the crafter's own
     record Need(Item item, String legend, int count) {
         String label() {
             if (legend != null) return count + "x " + DEFS.get(legend).name();
-            if (item == Items.PLAYER_HEAD) return "&f" + count + "x Player Head";
+            if (item == Items.PLAYER_HEAD) return "&f" + count + "x Enemy Team Head";
             return "&f" + count + "x " + item.getName().getString();
         }
 
-        boolean matches(ItemStack st) {
+        boolean matches(ItemStack st, String team) {
             if (legend != null) return legend.equals(id(st)) && slotsUntil(st) == 0;
-            if (item == Items.PLAYER_HEAD) return st.is(Items.PLAYER_HEAD) && st.has(DataComponents.PROFILE);
+            if (item == Items.PLAYER_HEAD) return st.is(Items.PLAYER_HEAD) && headTeam(st) != null && !headTeam(st).equals(team);
             return st.is(item) && id(st) == null;
         }
+    }
+
+    // a PvP death drops its team's head rather than the player's, so they stack
+    static ItemStack head(String team) {
+        ItemStack st = new ItemStack(Items.PLAYER_HEAD);
+        st.set(DataComponents.ITEM_NAME, flat(Teams.color(team) + team + " Head", false));
+        st.set(DataComponents.LORE, new ItemLore(List.of(line("&8Counts at altars for any team but " + team + "."))));
+        CompoundTag tag = new CompoundTag();
+        tag.putString("moneysmp_head", team);
+        st.set(DataComponents.CUSTOM_DATA, CustomData.of(tag));
+        return st;
+    }
+
+    static String headTeam(ItemStack st) {
+        CustomData data = st.get(DataComponents.CUSTOM_DATA);
+        String team = data == null ? "" : data.copyTag().getStringOr("moneysmp_head", "");
+        return team.isEmpty() ? null : team;
     }
 
     private static Need of(Item item, int count) {
@@ -591,11 +608,12 @@ public final class Legends {
     private boolean take(ServerPlayer p, String type) {
         Inventory inv = p.getInventory();
         List<String> missing = new ArrayList<>();
+        String team = plugin.data.team(p.getUUID());
         for (Need n : RECIPES.get(type)) {
             int have = 0;
             for (int i = 0; i < inv.getContainerSize(); i++) {
                 ItemStack st = inv.getItem(i);
-                if (n.matches(st)) have += st.getCount();
+                if (n.matches(st, team)) have += st.getCount();
             }
             if (have < n.count()) missing.add(n.count() - have + "x " + n.label().replaceFirst("^(&.)?\\d+x ", "$1"));
         }
@@ -608,7 +626,7 @@ public final class Legends {
             return false;
         }
         for (Need n : RECIPES.get(type)) {
-            Predicate<ItemStack> match = n::matches;
+            Predicate<ItemStack> match = st -> n.matches(st, team);
             inv.clearOrCountMatchingItems(match, n.count(), p.inventoryMenu.getCraftSlots());
         }
         if (cost > 0) {
@@ -730,11 +748,8 @@ public final class Legends {
         UUID uid = victim.getUUID();
         boolean rotting = onMoss.remove(uid) | paleShot.remove(uid) != null;
         ServerPlayer killer = source.getEntity() instanceof ServerPlayer k && k != victim ? k : null;
-        if (killer != null) {
-            ItemStack head = new ItemStack(Items.PLAYER_HEAD);
-            head.set(DataComponents.PROFILE, ResolvableProfile.createResolved(victim.getGameProfile()));
-            drop(level, victim, head);
-        }
+        String team = plugin.data.team(uid);
+        if (killer != null && team != null) drop(level, victim, head(team));
         if (isOg(uid)) return;
         String was = species(uid);
         if (killer != null && species(killer.getUUID()).equals("vampire") && !was.equals("vampire")) {

@@ -25,7 +25,8 @@
 #  - the wand not keeping what it killed, the disguise being visible to its wearer, the
 #    wearer still visible to others, or blows on the disguise not reaching the wearer
 #  - a Crazy Slots transformation that can be dropped as the weapon it turned into
-#  - species not passing on a vampire's kill, PvP deaths not dropping a head
+#  - species not passing on a vampire's kill, PvP deaths not dropping a head in the victim's
+#    team colour, or an altar taking a team's own heads
 #  - the contagion ritual not converting everyone, or not breaking when hit enough
 #  - the arc 3 abilities: Shadow Daggers, Shadow Leap hiding and surfacing, Wind Leap,
 #    Windweaver Gust, the emerald set's worn effects, Emerald Vision, lightning immunity and
@@ -435,17 +436,38 @@ feed() {
     echo "execute if items block 305 -50 310 container.0 minecraft:clay_ball run say SMOKE warden heart would not smelt"
     echo "execute if items block 307 -50 310 container.2 minecraft:brick run say SMOKE plain clay smelted"
 
-    # ── species: a vampire's kill turns, and drops a head ──
+    # ── species: a vampire's kill turns, and drops a head in the victim's team colour ──
+    echo "moneysmp team set Alice Red"
+    echo "moneysmp team set Bob Blue"
     echo "moneysmp legendary species Bob vampire"
     face
     echo "clear Alice"
     echo "damage Alice 100 minecraft:player_attack by Bob"
     sleep 2
     # Alice respawns on the spot and may already have picked it back up
-    echo "execute if entity @e[type=item,nbt={Item:{id:\"minecraft:player_head\"}}] run say SMOKE head dropped"
-    echo "execute if items entity @a container.* minecraft:player_head run say SMOKE head dropped"
+    echo "execute if entity @e[type=item,nbt={Item:{components:{\"minecraft:custom_data\":{moneysmp_head:\"Red\"}}}}] run say SMOKE red head dropped"
+    echo "execute if items entity @a container.* minecraft:player_head[minecraft:custom_data~{moneysmp_head:\"Red\"}] run say SMOKE red head dropped"
     echo "kill @e[type=item]"
     sleep 3
+
+    # ── an altar won't take the crafter's own team's heads ──
+    echo "clear Alice"
+    echo "tp Alice 330 -60 300"
+    sleep 1
+    echo "execute as Alice at Alice run moneysmp legendary altar windweaver"
+    echo "moneysmp set Alice 1000"
+    echo "give Alice minecraft:breeze_rod 160"
+    echo "give Alice minecraft:heavy_core 1"
+    echo "give Alice minecraft:diamond_block 160"
+    echo "give Alice minecraft:player_head[minecraft:custom_data={moneysmp_head:\"Red\"}] 10"
+    sleep 2
+    do_ Alice click 330 -60 300
+    echo "give Alice minecraft:player_head[minecraft:custom_data={moneysmp_head:\"Blue\"}] 10"
+    sleep 1
+    do_ Alice click 330 -60 300
+    echo "execute if items entity Alice container.* minecraft:player_head[minecraft:custom_data~{moneysmp_head:\"Red\"}] run say SMOKE own heads kept"
+    echo "execute unless items entity Alice container.* minecraft:player_head[minecraft:custom_data~{moneysmp_head:\"Blue\"}] run say SMOKE enemy heads taken"
+    echo "clear Alice"
 
     # ── contagion: completes, then breaks ──
     echo "moneysmp legendary species Bob human"
@@ -551,7 +573,11 @@ check "SMOKE slots rolled" "Crazy Slots transforms"
 check "SMOKE dropped transformation turned back" "dropped transformation reverts"
 check "SMOKE warden heart would not smelt" "legendary part refused by the furnace"
 check "SMOKE plain clay smelted" "furnace works for plain clay"
-check "SMOKE head dropped" "PvP death drops a head"
+check "SMOKE red head dropped" "PvP death drops a head in the victim's team colour"
+check "This altar still needs: 10x Enemy Team Head" "an altar won't count the crafter's own team's heads"
+check "Alice has crafted Windweaver" "another team's heads craft"
+check "SMOKE own heads kept" "own team's heads left in the inventory"
+check "SMOKE enemy heads taken" "the other team's heads used up"
 check "CONTAGION RITUAL TUNED TO" "ritual starts"
 check "100% COMPLETE" "ritual completes"
 check "Contagion Signal is at" "integrity warnings"
