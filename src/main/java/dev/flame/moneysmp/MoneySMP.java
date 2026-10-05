@@ -5,8 +5,14 @@ import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback;
 import net.fabricmc.fabric.api.entity.event.v1.ServerEntityWorldChangeEvents;
 import net.fabricmc.fabric.api.entity.event.v1.ServerLivingEntityEvents;
 import net.fabricmc.fabric.api.entity.event.v1.ServerPlayerEvents;
+import net.fabricmc.fabric.api.event.lifecycle.v1.ServerChunkEvents;
+import net.fabricmc.fabric.api.event.lifecycle.v1.ServerEntityEvents;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
+import net.fabricmc.fabric.api.event.player.AttackBlockCallback;
+import net.fabricmc.fabric.api.event.player.PlayerBlockBreakEvents;
+import net.fabricmc.fabric.api.event.player.UseBlockCallback;
+import net.fabricmc.fabric.api.event.player.UseItemCallback;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayConnectionEvents;
 import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.server.MinecraftServer;
@@ -44,7 +50,10 @@ public final class MoneySMP implements ModInitializer {
     Config config;
     final Auction auction = new Auction(this);
     final ControlPoints points = new ControlPoints(this);
+    final Altar altar = new Altar(this);
     final Unlockout unlockout = new Unlockout(this);
+    final Legends legends = new Legends(this);
+    final Weapons weapons = new Weapons(this);
     private int tick;
 
     @Override
@@ -58,40 +67,79 @@ public final class MoneySMP implements ModInitializer {
             data = new Data(dir, s);
             data.load();
             points.load(dir);
+            altar.load(dir);
             unlockout.load(dir);
+            legends.load(dir);
             Teams.setup(s);
             for (ServerPlayer p : s.getPlayerList().getPlayers()) sync(p);
         });
         ServerLifecycleEvents.SERVER_STOPPING.register(s -> {
             if (data != null) data.close();
+            altar.save();
+            legends.save();
+            weapons.fillCraters();
             auction.running = false;
             notify.clear();
             status.clear();
         });
 
         ServerPlayConnectionEvents.JOIN.register((handler, sender, s) -> onJoin(handler.player));
-        ServerPlayConnectionEvents.DISCONNECT.register((handler, s) -> {
+        // a timed-out connection fires this from the network thread, so hop to the server
+        // thread before touching anything (execute runs inline when already on it)
+        ServerPlayConnectionEvents.DISCONNECT.register((handler, s) -> s.execute(() -> {
             notify.remove(handler.player.getUUID());
             status.remove(handler.player.getUUID());
+            altar.leave(handler.player);
             unlockout.leave(handler.player);
-        });
+            weapons.leave(handler.player);
+            legends.leave(handler.player);
+        }));
         ServerLivingEntityEvents.AFTER_DEATH.register((entity, source) -> {
             if (entity instanceof ServerPlayer victim) onDeath(victim);
             unlockout.onDeath(entity, source);
+            weapons.onDeath(entity, source);
+            legends.onDeath(entity, source);
+        });
+        // Crazy Slots transformations go back before the death drops are made
+        ServerLivingEntityEvents.ALLOW_DEATH.register((entity, source, amount) -> {
+            if (entity instanceof ServerPlayer p) weapons.revertAll(p, true);
+            return true;
         });
         // the client keeps its waypoints across respawns and dimension changes, so resend
         // (or clear) ours whenever vanilla would have resent the player ones
         ServerPlayerEvents.AFTER_RESPAWN.register((old, p, alive) -> {
             ControlPoints.hideFromLocator(p);
             points.sendWaypoints(p);
+            altar.sendWaypoints(p);
             unlockout.giveMap(p);
+            legends.respawned(p);
         });
-        ServerEntityWorldChangeEvents.AFTER_PLAYER_CHANGE_WORLD.register((p, from, to) -> points.sendWaypoints(p));
+        ServerEntityWorldChangeEvents.AFTER_PLAYER_CHANGE_WORLD.register((p, from, to) -> {
+            points.sendWaypoints(p);
+            altar.sendWaypoints(p);
+        });
+        ServerChunkEvents.CHUNK_LOAD.register((level, chunk) -> altar.chunkLoaded(chunk));
+        ServerChunkEvents.CHUNK_UNLOAD.register((level, chunk) -> altar.chunkUnloaded(chunk));
+        UseBlockCallback.EVENT.register(altar::use);
+        UseBlockCallback.EVENT.register(legends::use);
+        UseItemCallback.EVENT.register(weapons::use);
+        AttackBlockCallback.EVENT.register((p, level, hand, pos, dir) -> legends.attack(p, level, hand, pos));
+        ServerEntityEvents.ENTITY_LOAD.register((e, level) -> weapons.loaded(e));
+        PlayerBlockBreakEvents.BEFORE.register((level, p, pos, state, be) -> !altar.isAltar(level, pos) && !legends.isAltar(level, pos));
+        PlayerBlockBreakEvents.AFTER.register((level, p, pos, state, be) -> weapons.mined(level, p, pos));
         ServerTickEvents.END_SERVER_TICK.register(s -> {
             tick++;
-            if (tick % 5 == 0) points.draw();
+            altar.sweep();
+            weapons.tick();
+            if (tick % 5 == 0) {
+                points.draw();
+                altar.draw();
+                legends.draw();
+            }
             if (tick % 20 == 0) {
                 points.tick();
+                altar.tick();
+                legends.tick();
                 unlockout.tick();
                 actionBarTick();
                 auction.tick();
@@ -105,6 +153,8 @@ public final class MoneySMP implements ModInitializer {
 
     void sync(ServerPlayer p) {
         Teams.sync(server, p, data.tier(p.getUUID()), data.team(p.getUUID()));
+        // a species mark replaces vanilla's team-coloured tab name, so it has to follow team changes
+        legends.refreshTab(p);
     }
 
     void notify(UUID uid, String msg, int secs) {
@@ -116,7 +166,9 @@ public final class MoneySMP implements ModInitializer {
         sync(p);
         ControlPoints.hideFromLocator(p);
         points.sendWaypoints(p);
+        altar.join(p);
         unlockout.join(p);
+        legends.join(p);
     }
 
     // PvP only: attacker +$20, victim -$20. Mob kills give nothing.

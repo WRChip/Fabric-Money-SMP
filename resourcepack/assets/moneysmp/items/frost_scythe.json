@@ -1,0 +1,14 @@
+{
+  "model": {
+    "type": "minecraft:condition",
+    "property": "minecraft:using_item",
+    "on_false": {
+      "type": "minecraft:model",
+      "model": "moneysmp:weapons/frostscythe"
+    },
+    "on_true": {
+      "type": "minecraft:model",
+      "model": "moneysmp:weapons/frostscythe_2"
+    }
+  }
+}

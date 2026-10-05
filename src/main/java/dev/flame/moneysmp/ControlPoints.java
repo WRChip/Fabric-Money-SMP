@@ -306,7 +306,7 @@ final class ControlPoints {
             if (level == null) continue;
             String held = owner.get(e.getKey());
             int color = held != null ? Teams.rgb(held) : superPoints.contains(e.getKey()) ? NETHERITE : GRAY;
-            ring(level, pt.pos(), color);
+            ring(level, pt.pos(), color, plugin.config.controlPointRadius, phase);
             beam(level, pt.pos(), color);
         }
     }
@@ -325,7 +325,7 @@ final class ControlPoints {
             Map<String, Integer> present = new HashMap<>();
             List<ServerPlayer> inside = new ArrayList<>();
             for (ServerPlayer p : level.players()) {
-                if (p.isSpectator() || !inRing(p, pt.pos())) continue;
+                if (p.isSpectator() || !inRing(p, pt.pos(), plugin.config.controlPointRadius, plugin.config.controlPointHeight)) continue;
                 inside.add(p);
                 String team = plugin.data.team(p.getUUID());
                 if (team != null) present.merge(team, 1, Integer::sum);
@@ -359,12 +359,11 @@ final class ControlPoints {
         }
     }
 
-    private boolean inRing(ServerPlayer p, BlockPos c) {
-        int r = plugin.config.controlPointRadius;
+    static boolean inRing(ServerPlayer p, BlockPos c, int r, int h) {
         double dx = p.getX() - (c.getX() + 0.5);
         double dz = p.getZ() - (c.getZ() + 0.5);
         double dy = p.getY() - c.getY();
-        return dx * dx + dz * dz <= r * r && dy >= -1 && dy <= plugin.config.controlPointHeight;
+        return dx * dx + dz * dz <= r * r && dy >= -1 && dy <= h;
     }
 
     private static String status(int n, boolean sup, Map<String, Double> prog, boolean contested) {
@@ -377,12 +376,11 @@ final class ControlPoints {
         return sb.toString();
     }
 
-    private void ring(ServerLevel level, BlockPos c, int color) {
+    static void ring(ServerLevel level, BlockPos c, int color, int r, int phase) {
         DustParticleOptions dust = new DustParticleOptions(color, 1.5f);
         double cx = c.getX() + 0.5;
         double cz = c.getZ() + 0.5;
         double y = c.getY() + 0.3;
-        int r = plugin.config.controlPointRadius;
         // same spacing as 8 around the default radius, so bigger rings don't thin out
         int count = Math.max(8, r * 8 / 5);
         for (int i = 0; i < count; i++) {
@@ -393,7 +391,7 @@ final class ControlPoints {
 
     // a thick column of dust from the ring up into the sky. forced so it shows from far
     // away like a real beacon beam; each packet scatters its particles around one height
-    private static void beam(ServerLevel level, BlockPos c, int color) {
+    static void beam(ServerLevel level, BlockPos c, int color) {
         DustParticleOptions dust = new DustParticleOptions(color, 4f);
         double cx = c.getX() + 0.5;
         double cz = c.getZ() + 0.5;
@@ -413,21 +411,23 @@ final class ControlPoints {
         Config cfg = plugin.config;
         double money = sup ? cfg.controlPointSuperMoney : cfg.controlPointMoney;
         int total = plugin.data.teamPoints.merge(team, cfg.controlPointPoints, Integer::sum);
-        for (Map.Entry<UUID, Data.PlayerData> e : plugin.data.players.entrySet()) {
-            Data.PlayerData pd = e.getValue();
-            if (!team.equals(pd.team)) continue;
-            pd.money += money;
-            plugin.data.log("POINT", "CONTROL POINT #" + n, pd.name, money, sup ? "Captured super control point" : "Captured control point");
-            if (plugin.server.getPlayerList().getPlayer(e.getKey()) != null) {
-                plugin.notify(e.getKey(), "&a&l+ $" + Fmt.money(money) + "  &7Point #" + n + " captured!  &8|  &a$ &e" + Fmt.money(pd.money), 6);
-            }
+        // split between the team's online players. never empty: someone on it is standing in the ring
+        List<ServerPlayer> online = new ArrayList<>();
+        for (ServerPlayer p : players()) if (team.equals(plugin.data.team(p.getUUID()))) online.add(p);
+        double share = money / online.size();
+        for (ServerPlayer p : online) {
+            Data.PlayerData pd = plugin.data.get(p.getUUID());
+            pd.money += share;
+            plugin.data.log("POINT", "CONTROL POINT #" + n, pd.name, share, sup ? "Captured super control point" : "Captured control point");
+            plugin.notify(p.getUUID(), "&a&l+ $" + Fmt.money(share) + "  &7Point #" + n + " captured!  &8|  &a$ &e" + Fmt.money(pd.money), 6);
         }
         drop(level, pt.pos(), pool(sup).take());
 
         String col = Teams.color(team);
         broadcast("");
         broadcast(Fmt.PREFIX + " " + col + "&l" + team + " &acaptured " + (sup ? "&8&l✦ super " : "") + "&acontrol point &f#" + n + "&a!");
-        broadcast("  &7+" + cfg.controlPointPoints + " pts  &8|  &7+$" + Fmt.money(money) + " per member  &8|  " + col + team + " &7now has &e" + total + " pts");
+        broadcast("  &7+" + cfg.controlPointPoints + " pts  &8|  &7+$" + Fmt.money(money) + " &8($" + Fmt.money(share) + " each, " + online.size() + " online)  &8|  "
+            + col + team + " &7now has &e" + total + " pts");
         broadcast("");
         save();
         for (ServerPlayer p : players()) sendWaypoints(p);

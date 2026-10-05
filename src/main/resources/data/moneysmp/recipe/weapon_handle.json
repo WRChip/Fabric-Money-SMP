@@ -1,0 +1,18 @@
+{
+  "type": "minecraft:crafting_shapeless",
+  "category": "misc",
+  "ingredients": [
+    "minecraft:netherite_ingot",
+    "minecraft:netherite_ingot",
+    "minecraft:nether_star"
+  ],
+  "result": {
+    "id": "minecraft:clay_ball",
+    "components": {
+      "minecraft:item_name": {"text": "Weapon Handle", "color": "red"},
+      "minecraft:item_model": "moneysmp:weapon_handle",
+      "minecraft:custom_data": {"moneysmp_legend": "weapon_handle"},
+      "minecraft:lore": [{"text": "Part of a legendary weapon.", "color": "dark_gray", "italic": false}]
+    }
+  }
+}

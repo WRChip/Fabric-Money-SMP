@@ -1,0 +1,8 @@
+accessWidener v2 named
+# Weapons re-asks who sees a player the moment it hides or shows them
+accessible class net/minecraft/server/level/ChunkMap$TrackedEntity
+accessible field net/minecraft/server/level/ChunkMap entityMap Lit/unimi/dsi/fastutil/ints/Int2ObjectMap;
+# Vulcan's arrows pierce shields the way a Piercing crossbow's do
+accessible method net/minecraft/world/entity/projectile/arrow/AbstractArrow setPierceLevel (B)V
+# a disguise as a player shouldn't say "NPC" under the name
+accessible method net/minecraft/world/entity/decoration/Mannequin setHideDescription (Z)V

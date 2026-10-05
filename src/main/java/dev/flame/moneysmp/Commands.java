@@ -33,7 +33,7 @@ import static com.mojang.brigadier.arguments.StringArgumentType.word;
 final class Commands {
     private static final String LINE = "&8&m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━";
     private static final List<String> ADMIN_SUBS = List.of("give", "take", "set", "reset", "fine", "transaction",
-        "teambal", "teammax", "teamcount", "team", "randomteams", "tier", "auction", "post-auction", "point", "event", "reload");
+        "teambal", "teammax", "teamcount", "team", "randomteams", "tier", "auction", "post-auction", "point", "event", "timer", "reload", "legendary");
     // reshaping teams or tiers under a live auction would leave it selling players that
     // moved or bidding for teams whose leader changed
     private static final Set<String> LOCKED_DURING_AUCTION = Set.of("reset", "randomteams", "tier", "team", "post-auction");
@@ -56,6 +56,20 @@ final class Commands {
             SharedSuggestionProvider.suggest(Teams.active(c.data().teamCount, c.data().disabledTeams), b);
         SuggestionProvider<CommandSourceStack> allTeams = (ctx, b) ->
             SharedSuggestionProvider.suggest(Teams.NAMES, b);
+        SuggestionProvider<CommandSourceStack> fragments = (ctx, b) ->
+            SharedSuggestionProvider.suggest(Altar.NAMES, b);
+        SuggestionProvider<CommandSourceStack> legendItems = (ctx, b) ->
+            SharedSuggestionProvider.suggest(Legends.DEFS.keySet(), b);
+        SuggestionProvider<CommandSourceStack> legendAltars = (ctx, b) ->
+            SharedSuggestionProvider.suggest(Legends.RECIPES.keySet(), b);
+        SuggestionProvider<CommandSourceStack> species = (ctx, b) ->
+            SharedSuggestionProvider.suggest(List.of("human", "vampire", "pale", "plaguedoctor"), b);
+        SuggestionProvider<CommandSourceStack> playersOrAll = (ctx, b) -> {
+            Set<String> names = new TreeSet<>(c.data().byName.keySet());
+            for (ServerPlayer p : c.onlinePlayers()) names.add(p.getScoreboardName());
+            names.add("all");
+            return SharedSuggestionProvider.suggest(names, b);
+        };
         SuggestionProvider<CommandSourceStack> tiers = (ctx, b) ->
             SharedSuggestionProvider.suggest(Tiers.NAMES, b);
         SuggestionProvider<CommandSourceStack> times = (ctx, b) ->
@@ -99,7 +113,9 @@ final class Commands {
             .then(literal("bid").executes(c.exec("bid"))
                 .then(argument("amount", word()).executes(c.exec("bid", "amount"))))
             .then(literal("reset").requires(admin).executes(c.exec("reset")))
-            .then(literal("teambal").requires(admin).executes(c.exec("teambal")))
+            .then(literal("teambal").requires(admin).executes(c.exec("teambal"))
+                .then(literal("balance").executes(c.exec("teambal balance")))
+                .then(literal("debtbalance").executes(c.exec("teambal debtbalance"))))
             .then(literal("randomteams").requires(admin).executes(c.exec("randomteams"))
                 .then(argument("tier", word()).suggests(tiers).executes(c.exec("randomteams", "tier"))))
             .then(literal("auction").requires(admin).executes(c.exec("auction"))
@@ -120,9 +136,9 @@ final class Commands {
                 .then(argument("time", word()).suggests(times).executes(c.exec("transaction", "time"))
                     .then(argument("page", word()).executes(c.exec("transaction", "time", "page")))))
             .then(literal("fine").requires(admin).executes(c.exec("fine"))
-                .then(argument("player", word()).suggests(players).executes(c.exec("fine", "player"))
-                    .then(argument("amount", word()).executes(c.exec("fine", "player", "amount"))
-                        .then(argument("reason", greedyString()).executes(c.exec("fine", "player", "amount", "reason"))))))
+                .then(argument("team", word()).suggests(teams).executes(c.exec("fine", "team"))
+                    .then(argument("amount", word()).executes(c.exec("fine", "team", "amount"))
+                        .then(argument("reason", greedyString()).executes(c.exec("fine", "team", "amount", "reason"))))))
             .then(literal("team").requires(admin).executes(c.exec("team"))
                 .then(literal("set").executes(c.exec("team set"))
                     .then(argument("player", word()).suggests(players).executes(c.exec("team set", "player"))
@@ -132,13 +148,19 @@ final class Commands {
                 .then(literal("disable").executes(c.exec("team disable"))
                     .then(argument("team", word()).suggests(allTeams).executes(c.exec("team disable", "team"))))
                 .then(literal("leader").executes(c.exec("team leader"))
-                    .then(argument("player", word()).suggests(players).executes(c.exec("team leader", "player")))))
+                    .then(argument("player", word()).suggests(players).executes(c.exec("team leader", "player"))))
+                .then(literal("remove").executes(c.exec("team remove"))
+                    .then(argument("player", word()).suggests(players).executes(c.exec("team remove", "player")))))
             .then(point)
             .then(literal("unlockout").executes(c.exec("unlockout"))
                 .then(literal("list").executes(c.exec("unlockout list")))
                 .then(literal("map").executes(c.exec("unlockout map")))
                 .then(literal("start").executes(c.exec("unlockout start")))
                 .then(literal("stop").executes(c.exec("unlockout stop"))))
+            .then(literal("timer").requires(admin).executes(c.exec("timer"))
+                .then(literal("skip").executes(c.exec("timer skip"))
+                    .then(argument("player", word()).suggests(players).executes(c.exec("timer skip", "player"))))
+                .then(argument("player", word()).suggests(players).executes(c.exec("timer", "player"))))
             .then(literal("event").requires(admin).executes(c.exec("event"))
                 .then(literal("control-point").executes(c.exec("event control-point"))
                     .then(literal("start").executes(c.exec("event control-point start")))
@@ -146,7 +168,30 @@ final class Commands {
                 .then(literal("unlockout").executes(c.exec("event unlockout"))
                     .then(literal("start").executes(c.exec("event unlockout start"))
                         .then(argument("time", word()).suggests(times).executes(c.exec("event unlockout start", "time"))))
-                    .then(literal("stop").executes(c.exec("event unlockout stop")))));
+                    .then(literal("stop").executes(c.exec("event unlockout stop"))))
+                .then(literal("altar").executes(c.exec("event altar"))
+                    .then(literal("start").executes(c.exec("event altar start")))
+                    .then(literal("stop").executes(c.exec("event altar stop")))
+                    .then(literal("give").executes(c.exec("event altar give"))
+                        .then(argument("player", word()).suggests(players).executes(c.exec("event altar give", "player"))
+                            .then(argument("fragment", word()).suggests(fragments).executes(c.exec("event altar give", "player", "fragment")))))
+                    .then(literal("respawn").executes(c.exec("event altar respawn"))
+                        .then(argument("fragment", word()).suggests(fragments).executes(c.exec("event altar respawn", "fragment"))))));
+
+        root.then(literal("legendary").requires(admin).executes(c.exec("legendary"))
+            .then(literal("give").executes(c.exec("legendary give"))
+                .then(argument("player", word()).suggests(players).executes(c.exec("legendary give", "player"))
+                    .then(argument("item", word()).suggests(legendItems).executes(c.exec("legendary give", "player", "item")))))
+            .then(literal("altar").executes(c.exec("legendary altar"))
+                .then(literal("remove").executes(c.exec("legendary altar remove")))
+                .then(literal("list").executes(c.exec("legendary altar list")))
+                .then(argument("type", word()).suggests(legendAltars).executes(c.exec("legendary altar", "type"))))
+            .then(literal("species").executes(c.exec("legendary species"))
+                .then(argument("player", word()).suggests(playersOrAll).executes(c.exec("legendary species", "player"))
+                    .then(argument("species", word()).suggests(species).executes(c.exec("legendary species", "player", "species")))))
+            .then(literal("contagion").executes(c.exec("legendary contagion"))
+                .then(literal("stop").executes(c.exec("legendary contagion stop")))
+                .then(literal("reset").executes(c.exec("legendary contagion reset")))));
 
         for (String sub : new String[]{"give", "take", "set"}) {
             root.then(literal(sub).requires(admin).executes(c.exec(sub))
@@ -176,6 +221,12 @@ final class Commands {
             .then(literal("map").executes(ctx -> c.unlockout(ctx.getSource(), "map")))
             .then(literal("start").executes(ctx -> c.unlockout(ctx.getSource(), "start")))
             .then(literal("stop").executes(ctx -> c.unlockout(ctx.getSource(), "stop"))));
+
+        d.register(literal("altar")
+            .executes(ctx -> c.altar(ctx.getSource()))
+            .then(literal("list").executes(ctx -> c.altar(ctx.getSource()))
+                .then(literal("shards").executes(ctx -> c.altar(ctx.getSource()))))
+            .then(literal("shards").executes(ctx -> c.altar(ctx.getSource()))));
 
         for (String name : new String[]{"balance", "bal"}) {
             d.register(literal(name)
@@ -311,6 +362,7 @@ final class Commands {
             case "teams" -> teams(s);
             case "tiers" -> tiers(s);
             case "unlockout" -> unlockout(s, args.length > 1 ? args[1].toLowerCase() : "");
+            case "altar" -> plugin.altar.show(s);
             case "bid" -> {
                 Double amt = args.length > 1 ? num(args[1]) : null;
                 if (amt == null) send(s, Fmt.PREFIX + " &cUsage: &f/bid <amount>");
@@ -336,7 +388,11 @@ final class Commands {
                     case "reset" -> reset(s);
                     case "fine" -> fine(s, args);
                     case "transaction" -> transaction(s, args);
-                    case "teambal" -> teambal(s);
+                    case "teambal" -> {
+                        if (args.length > 1 && args[1].equalsIgnoreCase("balance")) spreadDebt(s, false);
+                        else if (args.length > 1 && args[1].equalsIgnoreCase("debtbalance")) spreadDebt(s, true);
+                        else teambal(s);
+                    }
                     case "teammax" -> teammax(s, args);
                     case "teamcount" -> teamcount(s, args);
                     case "team" -> team(s, args);
@@ -349,7 +405,9 @@ final class Commands {
                     case "post-auction" -> postAuction(s);
                     case "point" -> point(s, args);
                     case "event" -> event(s, args);
+                    case "timer" -> timer(s, args);
                     case "reload" -> reload(s);
+                    case "legendary" -> legendary(s, args);
                     default -> send(s, Fmt.PREFIX + " &cUnknown subcommand. Run &f/moneysmp &7for help.");
                 }
             }
@@ -367,6 +425,7 @@ final class Commands {
         send(s, "  &f/moneysmp teams");
         send(s, "  &f/moneysmp tiers");
         send(s, "  &f/unlockout &8[list|map]  &8(during an unlockout event)");
+        send(s, "  &f/altar  &8(during an altar event: where every fragment is)");
         send(s, "  &f/pay &e<player> <amount>");
         send(s, "  &f/bid &e<amount>  &8(during an auction)");
         if (admin) {
@@ -376,8 +435,9 @@ final class Commands {
             send(s, "  &f/moneysmp take &e<player> <amount>");
             send(s, "  &f/moneysmp set &e<player> <amount>");
             send(s, "  &f/moneysmp reset");
-            send(s, "  &f/moneysmp fine &e<player> <amount> <reason>");
-            send(s, "  &f/moneysmp teambal");
+            send(s, "  &f/moneysmp fine &e<team> <amount> <reason>  &8(split evenly across the team)");
+            send(s, "  &f/moneysmp teambal  &8/ &fteambal balance  &8(spread members' debt over their team)");
+            send(s, "  &f/moneysmp teambal debtbalance  &8(pool an indebted team's money, split it evenly)");
             send(s, "  &f/moneysmp teammax &e<number>");
             send(s, "  &f/moneysmp teamcount &e<1-" + Teams.NAMES.size() + ">");
             send(s, "  &f/moneysmp randomteams &8[tier]");
@@ -385,6 +445,7 @@ final class Commands {
             send(s, "  &f/moneysmp team enable &e<team>");
             send(s, "  &f/moneysmp team disable &e<team>");
             send(s, "  &f/moneysmp team leader &e<player>");
+            send(s, "  &f/moneysmp team remove &e<player>");
             send(s, "  &f/moneysmp tier set &e<player> <S-F>");
             send(s, "  &f/moneysmp tier clear &e<player>");
             send(s, "  &f/moneysmp auction &8[stop]");
@@ -394,6 +455,12 @@ final class Commands {
             send(s, "  &f/moneysmp point loot&8/&fsuperloot &eadd&8|&eclear&8|&elist&8|&emode <once|random>");
             send(s, "  &f/moneysmp event control-point &estart&8/&estop");
             send(s, "  &f/moneysmp event unlockout &estart &8[time]&8/&estop");
+            send(s, "  &f/moneysmp event altar &estart&8/&estop&8/&egive <player> <fragment>&8/&erespawn <fragment>");
+            send(s, "  &f/moneysmp timer &e<player>  &8/ &ftimer skip &e<player>  &8(a carrier's logout grace and daily hour)");
+            send(s, "  &f/moneysmp legendary give &e<player> <item>");
+            send(s, "  &f/moneysmp legendary altar &e<type>  &8(where you stand) &8/ &faltar remove &8/ &faltar list");
+            send(s, "  &f/moneysmp legendary species &e<player|all> <human|vampire|pale|plaguedoctor>");
+            send(s, "  &f/moneysmp legendary contagion &estop&8/&ereset");
             send(s, "  &f/moneysmp transaction &e<time> [page]  &8(e.g. 1h 30m 7d)");
             send(s, "  &f/moneysmp reload  &8(reread config.json)");
             send(s, "");
@@ -520,12 +587,14 @@ final class Commands {
         broadcast(Fmt.PREFIX + " &aAll balances reset to &l$100 &aand all teams have been cleared!");
     }
 
+    // the whole team pays, split evenly. whoever can't cover their share goes into debt,
+    // which /moneysmp teambal balance can then push onto the rest of the team
     private void fine(CommandSourceStack s, String[] args) {
         if (args.length < 4) {
-            send(s, Fmt.PREFIX + " &cUsage: &f/moneysmp fine <player> <amount> <reason>");
+            send(s, Fmt.PREFIX + " &cUsage: &f/moneysmp fine <team> <amount> <reason>");
             return;
         }
-        String name = args[1];
+        String team = Teams.normalise(args[1]);
         Double amt = num(args[2]);
         if (amt == null) {
             send(s, Fmt.PREFIX + " &cInvalid amount.");
@@ -536,25 +605,45 @@ final class Commands {
             send(s, Fmt.PREFIX + " &cFine must be above 0.");
             return;
         }
-        UUID uid = data().resolve(name);
-        if (uid == null) {
-            send(s, Fmt.PREFIX + " &cPlayer &f" + name + " &cnot found.");
+        List<String> active = Teams.active(data().teamCount, data().disabledTeams);
+        if (!active.contains(team)) {
+            send(s, Fmt.PREFIX + " &cInvalid team &f" + args[1] + "&c. Active teams:");
+            for (String t : active) send(s, "  " + Teams.color(t) + "&l" + t);
             return;
         }
-        Data.PlayerData pd = data().get(uid);
-        pd.money -= amt;
-        data().log("FINE", s.getTextName(), name, amt, reason);
+        List<UUID> members = new ArrayList<>();
+        for (Map.Entry<UUID, Data.PlayerData> e : data().players.entrySet()) {
+            if (team.equals(e.getValue().team)) members.add(e.getKey());
+        }
+        if (members.isEmpty()) {
+            send(s, Fmt.PREFIX + " &cTeam " + Teams.color(team) + team + " &chas no players.");
+            return;
+        }
+        double share = amt / members.size();
+        double total = 0;
+        int inDebt = 0;
+        for (UUID uid : members) {
+            Data.PlayerData pd = data().get(uid);
+            pd.money -= share;
+            total += pd.money;
+            if (pd.money < 0) inDebt++;
+            data().log("FINE", s.getTextName(), pd.name, share, reason);
+            ServerPlayer target = online(uid);
+            if (target != null) {
+                plugin.notify(uid, "&c&l- $" + Fmt.money(share) + "  &7Team fine: &f" + reason + "  &8|  &a$ &e" + Fmt.money(pd.money), 8);
+                send(target, Fmt.PREFIX + " &c&lYour team was fined &e$" + Fmt.money(amt) + "&c! Your share: &e$" + Fmt.money(share) + "&c. Reason: &f" + reason);
+            }
+        }
         broadcast("");
         broadcast(Fmt.PREFIX + " &c&l⚠ FINE ISSUED ⚠");
-        broadcast("  &7Player: &f" + name);
-        broadcast("  &7Amount: &c-$" + Fmt.money(amt));
+        broadcast("  &7Team: " + Teams.color(team) + "&l" + team);
+        broadcast("  &7Amount: &c-$" + Fmt.money(amt) + " &8(-$" + Fmt.money(share) + " each, " + members.size() + " members)");
         broadcast("  &7Reason: &f" + reason);
-        broadcast("  &7New Balance: &e$" + Fmt.money(pd.money));
+        broadcast("  &7New Team Total: &e$" + Fmt.money(total));
         broadcast("");
-        ServerPlayer target = online(uid);
-        if (target != null) {
-            plugin.notify(uid, "&c&l- $" + Fmt.money(amt) + "  &7Fine: &f" + reason + "  &8|  &a$ &e" + Fmt.money(pd.money), 8);
-            send(target, Fmt.PREFIX + " &c&lYou were fined &e$" + Fmt.money(amt) + "&c! Reason: &f" + reason);
+        if (inDebt > 0) {
+            send(s, Fmt.PREFIX + " &e" + inDebt + " &7member(s) of " + Teams.color(team) + team
+                + " &7are now in debt. &f/moneysmp teambal balance &7spreads it over their team.");
         }
     }
 
@@ -656,6 +745,76 @@ final class Commands {
         }
     }
 
+    // members in debt go back to $0 and the rest of their team covers it as evenly as it can:
+    // poorest first, each pays an even share of what's still owed or everything they have,
+    // whichever is less. a team that's underwater as a whole can't be fixed like that, so
+    // everyone on it just ends up owing the same. `even` (teambal debtbalance) skips all that
+    // and gives every member of an indebted team the same cut of the team total
+    private void spreadDebt(CommandSourceStack s, boolean even) {
+        if (plugin.auction.running) {
+            send(s, Fmt.PREFIX + " &cAn auction is running. Stop it first with &f/moneysmp auction stop&c.");
+            return;
+        }
+        boolean any = false;
+        for (String t : Teams.active(data().teamCount, data().disabledTeams)) {
+            List<Map.Entry<UUID, Data.PlayerData>> members = new ArrayList<>();
+            for (Map.Entry<UUID, Data.PlayerData> e : data().players.entrySet()) {
+                if (t.equals(e.getValue().team)) members.add(e);
+            }
+            double total = 0;
+            double debt = 0;
+            double[] old = new double[members.size()];
+            for (int i = 0; i < members.size(); i++) {
+                old[i] = members.get(i).getValue().money;
+                total += old[i];
+                if (old[i] < 0) debt -= old[i];
+            }
+            if (debt == 0) continue;
+            if (even || total < 0) {
+                for (var e : members) e.getValue().money = total / members.size();
+            } else {
+                List<Data.PlayerData> payers = new ArrayList<>();
+                for (var e : members) {
+                    Data.PlayerData pd = e.getValue();
+                    if (pd.money < 0) pd.money = 0;
+                    else if (pd.money > 0) payers.add(pd);
+                }
+                payers.sort((a, b) -> Double.compare(a.money, b.money));
+                double left = debt;
+                for (int i = 0; i < payers.size(); i++) {
+                    Data.PlayerData pd = payers.get(i);
+                    double part = Math.min(pd.money, left / (payers.size() - i));
+                    pd.money -= part;
+                    left -= part;
+                }
+            }
+            boolean changed = false;
+            for (int i = 0; i < members.size(); i++) {
+                UUID uid = members.get(i).getKey();
+                Data.PlayerData pd = members.get(i).getValue();
+                double diff = pd.money - old[i];
+                // float dust from an earlier even split, or a team that was already spread
+                if (Math.abs(diff) < 0.01) continue;
+                changed = true;
+                data().log("DEBT_SPLIT", "SYSTEM", pd.name, diff, (even ? "Team balance evened out across " : "Team debt spread across ") + t);
+                if (online(uid) != null) {
+                    String delta = diff > 0 ? "&a&l+ $" + Fmt.money(diff) : "&c&l- $" + Fmt.money(-diff);
+                    plugin.notify(uid, delta + (even ? "  &7Team balance evened out" : "  &7Team debt spread") + "  &8|  &a$ &e" + Fmt.money(pd.money), 8);
+                }
+            }
+            if (!changed) continue;
+            any = true;
+            if (even) {
+                broadcast(Fmt.PREFIX + " " + Teams.color(t) + "&l" + t + " &7evened out its balances to cover &c$" + Fmt.money(debt) + " &7of debt. Everyone now "
+                    + (total < 0 ? "owes &c$" + Fmt.money(-total / members.size()) : "has &e$" + Fmt.money(total / members.size())) + "&7.");
+            } else {
+                broadcast(Fmt.PREFIX + " " + Teams.color(t) + "&l" + t + " &7spread &c$" + Fmt.money(debt) + " &7of debt over the team."
+                    + (total < 0 ? " &8(underwater, everyone now owes &c$" + Fmt.money(-total / members.size()) + "&8)" : ""));
+            }
+        }
+        if (!any) send(s, Fmt.PREFIX + " &7No team debt to spread.");
+    }
+
     private void teammax(CommandSourceStack s, String[] args) {
         if (args.length < 2) {
             send(s, Fmt.PREFIX + " &cUsage: &f/moneysmp teammax <number>");
@@ -705,7 +864,7 @@ final class Commands {
 
     private void team(CommandSourceStack s, String[] args) {
         if (args.length < 2) {
-            send(s, Fmt.PREFIX + " &cUsage: &f/moneysmp team <set|enable|disable|leader> ...");
+            send(s, Fmt.PREFIX + " &cUsage: &f/moneysmp team <set|remove|enable|disable|leader> ...");
             return;
         }
         switch (args[1].toLowerCase()) {
@@ -713,12 +872,39 @@ final class Commands {
             case "enable" -> teamToggle(s, args, true);
             case "disable" -> teamToggle(s, args, false);
             case "leader" -> teamLeader(s, args);
-            default -> send(s, Fmt.PREFIX + " &cUsage: &f/moneysmp team <set|enable|disable|leader> ...");
+            case "remove" -> teamRemove(s, args);
+            default -> send(s, Fmt.PREFIX + " &cUsage: &f/moneysmp team <set|remove|enable|disable|leader> ...");
         }
     }
 
     // manual override for who bids on a team's behalf, in case the automatic
     // first-assigned pick isn't who you want
+    private void teamRemove(CommandSourceStack s, String[] args) {
+        if (args.length < 3) {
+            send(s, Fmt.PREFIX + " &cUsage: &f/moneysmp team remove <player>");
+            return;
+        }
+        String name = args[2];
+        UUID uid = data().resolve(name);
+        if (uid == null) {
+            send(s, Fmt.PREFIX + " &cPlayer &f" + name + " &cnot found.");
+            return;
+        }
+        Data.PlayerData pd = data().get(uid);
+        if (pd.team == null) {
+            send(s, Fmt.PREFIX + " &f" + pd.name + " &cisn't on a team.");
+            return;
+        }
+        String old = pd.team;
+        data().assignTeam(uid, null);
+        ServerPlayer target = online(uid);
+        if (target != null) {
+            plugin.sync(target);
+            send(target, Fmt.PREFIX + " &7You have been removed from team " + Teams.color(old) + "&l" + old + "&7.");
+        }
+        send(s, Fmt.PREFIX + " &aRemoved &f" + pd.name + " &afrom team " + Teams.color(old) + "&l" + old + "&a.");
+    }
+
     private void teamLeader(CommandSourceStack s, String[] args) {
         if (args.length < 3) {
             send(s, Fmt.PREFIX + " &cUsage: &f/moneysmp team leader <player>");
@@ -1163,6 +1349,24 @@ final class Commands {
 
     // ── unlockout ────────────────────────────────────────────────
 
+    // a carrier's altar clocks: shown, or skipped
+    private void timer(CommandSourceStack s, String[] args) {
+        boolean skip = args.length > 1 && args[1].equalsIgnoreCase("skip");
+        int at = skip ? 2 : 1;
+        if (args.length <= at) {
+            send(s, Fmt.PREFIX + " &cUsage: &f/moneysmp timer <player> &8| &ftimer skip <player>");
+            return;
+        }
+        String why = skip ? plugin.altar.skipTimers(args[at]) : plugin.altar.showTimers(s, args[at]);
+        if (why != null) send(s, Fmt.PREFIX + " " + why);
+        else if (skip) send(s, Fmt.PREFIX + " &aCleared &f" + args[at] + "&a's fragment timers.");
+    }
+
+    private int altar(CommandSourceStack s) {
+        plugin.altar.show(s);
+        return 1;
+    }
+
     private int unlockout(CommandSourceStack s, String sub) {
         Unlockout u = plugin.unlockout;
         // the admin commands live under event; point people there instead of a brigadier error
@@ -1186,6 +1390,61 @@ final class Commands {
         }
         u.show(s, sub.equals("list"));
         return 1;
+    }
+
+    // ── legendaries ──────────────────────────────────────────────
+
+    private void legendary(CommandSourceStack s, String[] args) {
+        Legends l = plugin.legends;
+        String sub = args.length > 1 ? args[1].toLowerCase() : "";
+        switch (sub) {
+            case "give" -> {
+                ServerPlayer target = args.length > 2 ? plugin.server.getPlayerList().getPlayerByName(args[2]) : null;
+                if (args.length < 4) send(s, Fmt.PREFIX + " &cUsage: &f/moneysmp legendary give <player> <item>");
+                else if (target == null) send(s, Fmt.PREFIX + " &cPlayer &f" + args[2] + " &cisn't online.");
+                else {
+                    String id = args[3].toLowerCase();
+                    String why = l.give(target, id);
+                    send(s, Fmt.PREFIX + " " + (why != null ? why : "&aGave &f" + args[2] + " " + Legends.DEFS.get(id).name() + "&a."));
+                }
+            }
+            case "altar" -> {
+                String what = args.length > 2 ? args[2].toLowerCase() : "";
+                ServerPlayer p = s.getPlayer();
+                if (what.equals("list")) l.list(s);
+                else if (what.isEmpty()) send(s, Fmt.PREFIX + " &cUsage: &f/moneysmp legendary altar <type|remove|list>");
+                else if (p == null) send(s, Fmt.PREFIX + " &cPlayers only.");
+                else if (what.equals("remove")) {
+                    String why = l.remove(p);
+                    send(s, Fmt.PREFIX + " " + (why != null ? why : "&aRemoved the altar."));
+                } else {
+                    String why = l.place(p, what);
+                    send(s, Fmt.PREFIX + " " + (why != null ? why : "&aPlaced the &f" + what + " &aaltar. It takes &e$"
+                        + Fmt.money(plugin.config.legendary.cost(what)) + " &aon top of its items, once."));
+                }
+            }
+            case "species" -> {
+                if (args.length < 4) {
+                    send(s, Fmt.PREFIX + " &cUsage: &f/moneysmp legendary species <player|all> <human|vampire|pale|plaguedoctor>");
+                    return;
+                }
+                String why = l.setSpeciesCmd(args[2], args[3]);
+                send(s, Fmt.PREFIX + " " + (why != null ? why : "&f" + args[2] + " &ais now &f" + args[3].toLowerCase() + "&a."));
+            }
+            case "contagion" -> {
+                String what = args.length > 2 ? args[2].toLowerCase() : "";
+                if (what.equals("stop")) {
+                    String why = l.stopRitual();
+                    if (why != null) send(s, Fmt.PREFIX + " " + why);
+                } else if (what.equals("reset")) {
+                    l.resetRitual();
+                    send(s, Fmt.PREFIX + " &aThe contagion ritual can be started again, and new players keep their own species.");
+                } else {
+                    send(s, Fmt.PREFIX + " &cUsage: &f/moneysmp legendary contagion <stop|reset>");
+                }
+            }
+            default -> send(s, Fmt.PREFIX + " &cUsage: &f/moneysmp legendary <give|altar|species|contagion>");
+        }
     }
 
     private void event(CommandSourceStack s, String[] args) {
@@ -1212,8 +1471,39 @@ final class Commands {
             }
             return;
         }
+        if (args.length >= 3 && args[1].equalsIgnoreCase("altar")) {
+            Altar a = plugin.altar;
+            switch (args[2].toLowerCase()) {
+                case "start" -> {
+                    String why = a.start();
+                    if (why != null) send(s, Fmt.PREFIX + " " + why);
+                }
+                case "stop" -> {
+                    if (!a.running) send(s, Fmt.PREFIX + " &cNo altar event is running.");
+                    else a.stop();
+                }
+                case "give" -> {
+                    ServerPlayer target = args.length > 3 ? plugin.server.getPlayerList().getPlayerByName(args[3]) : null;
+                    if (args.length < 5) send(s, Fmt.PREFIX + " &cUsage: &f/moneysmp event altar give <player> <fragment>");
+                    else if (target == null) send(s, Fmt.PREFIX + " &cPlayer &f" + args[3] + " &cisn't online.");
+                    else {
+                        String why = a.give(target, args[4]);
+                        if (why != null) send(s, Fmt.PREFIX + " " + why);
+                    }
+                }
+                case "respawn" -> {
+                    if (args.length < 4) send(s, Fmt.PREFIX + " &cUsage: &f/moneysmp event altar respawn <fragment>");
+                    else {
+                        String why = a.respawn(args[3]);
+                        if (why != null) send(s, Fmt.PREFIX + " " + why);
+                    }
+                }
+                default -> send(s, Fmt.PREFIX + " &cUsage: &f/moneysmp event altar <start|stop|give <player> <fragment>|respawn <fragment>>");
+            }
+            return;
+        }
         if (args.length < 3 || !args[1].equalsIgnoreCase("control-point")) {
-            send(s, Fmt.PREFIX + " &cUsage: &f/moneysmp event control-point <start|stop> &8| &funlockout <start [time]|stop>");
+            send(s, Fmt.PREFIX + " &cUsage: &f/moneysmp event control-point <start|stop> &8| &funlockout <start [time]|stop> &8| &faltar <start|stop>");
             return;
         }
         ControlPoints cp = plugin.points;

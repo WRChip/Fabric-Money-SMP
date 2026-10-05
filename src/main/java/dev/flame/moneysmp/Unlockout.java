@@ -30,7 +30,6 @@ import net.minecraft.world.entity.Leashable;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.Mob;
 import net.minecraft.world.entity.animal.Animal;
-import net.minecraft.world.entity.boss.wither.WitherBoss;
 import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.entity.monster.Enemy;
 import net.minecraft.world.entity.monster.warden.Warden;
@@ -87,32 +86,32 @@ public final class Unlockout {
         CONCRETE = 15, LEASH = 16, DOLPHIN = 17, TRIM = 18, HOSTILE = 19,
         SPRINT = 20, EFFECTS = 21, CONDUIT = 22, TAKEN = 23, NAMED = 24;
 
-    // tuned for a team of three to need about a day. nothing here needs the End
+    // meant to be a slog even for a maxed-out team: expect days, not hours. the End is fair game
     static final List<Goal> GOALS = List.of(
-        new Goal("Kill a Wither, an Elder Guardian and a Warden", "WITHER|GUARDN|WARDEN", Kind.SET, 3, "mobs"),
-        new Goal("Breed 20 unique mobs", "BREED|20|MOBS", Kind.SET, 20, "mobs"),
-        new Goal("Swim 15,000 blocks", "SWIM|15000|BLOCKS", Kind.COUNT, 15_000, "blocks"),
-        new Goal("Sneak 10,000 blocks", "SNEAK|10000|BLOCKS", Kind.COUNT, 10_000, "blocks"),
+        new Goal("Kill 10 Wardens", "KILL|10|WARDNS", Kind.COUNT, 10, "wardens"),
+        new Goal("Breed 2,500 animals", "BREED|2500|MOBS", Kind.COUNT, 2500, "animals"),
+        new Goal("Swim 100,000 blocks", "SWIM|100000|BLOCKS", Kind.COUNT, 100_000, "blocks"),
+        new Goal("Sneak 100,000 blocks", "SNEAK|100000|BLOCKS", Kind.COUNT, 100_000, "blocks"),
         new Goal("Wear all four armor trims from brushing at once", "4 BRSH|TRIMS|WORN", Kind.FLAG, 1, ""),
-        new Goal("Eat 30 different foods", "EAT 30|FOODS|", Kind.SET, 30, "foods"),
-        new Goal("Kill an evoker, ravager, piglin brute and elder guardian", "KILL|ELITE|MOBS", Kind.SET, 4, "mobs"),
-        new Goal("Unlock 10 unique ominous vaults", "UNLOCK|10 OMN|VAULTS", Kind.SET, 10, "vaults"),
-        new Goal("Die to the void", "DIE TO|THE|VOID", Kind.FLAG, 1, ""),
-        new Goal("Compost 11 types of edible food", "COMPST|11|FOODS", Kind.SET, 11, "foods"),
+        new Goal("Eat 38 different foods", "EAT 38|FOODS|", Kind.SET, 38, "foods"),
+        new Goal("Kill 50 piglin brutes", "KILL|50|BRUTES", Kind.COUNT, 50, "brutes"),
+        new Goal("Unlock 40 unique ominous vaults", "UNLOCK|40 OMN|VAULTS", Kind.SET, 40, "vaults"),
+        new Goal("Die to the void in the Overworld, the Nether and the End", "VOID|DEATH|3 DIMS", Kind.SET, 3, "dimensions"),
+        new Goal("Compost 10,000 food items", "COMPST|10000|FOODS", Kind.COUNT, 10_000, "foods"),
         new Goal("Get Hero of the Village, then die to the Warden within 30s", "HERO|THEN|WARDEN", Kind.FLAG, 1, ""),
-        new Goal("Kill a player from 3 different opposing teams", "KILL|PLAYER|3TEAMS", Kind.SET, 3, "teams"),
-        new Goal("Spy on 40 different mobs with a spyglass", "SPY|40|MOBS", Kind.SET, 40, "mobs"),
+        new Goal("Kill 50 players from opposing teams", "KILL|50|PLAYRS", Kind.COUNT, 50, "kills"),
+        new Goal("Spy on 70 different mobs with a spyglass", "SPY|70|MOBS", Kind.SET, 70, "mobs"),
         new Goal("Relic disc from trail ruins", "RELIC|DISC|", Kind.FLAG, 1, ""),
         new Goal("Deal 1,000,000 damage", "DEAL|1M|DAMAGE", Kind.COUNT, 1_000_000, "damage"),
-        new Goal("1,024 red concrete", "1024|RED|CONCRT", Kind.COUNT, 1024, "red concrete"),
-        new Goal("Have 20 unique mobs on one player's leashes at the same time", "20 MOB|LEASHD|ONCE", Kind.FLAG, 1, ""),
+        new Goal("4,096 red concrete", "4096|RED|CONCRT", Kind.COUNT, 4096, "red concrete"),
+        new Goal("Have 30 unique mobs on one player's leashes at the same time", "30 MOB|LEASHD|ONCE", Kind.FLAG, 1, ""),
         new Goal("Give a dolphin a netherite block", "DOLPHN|NETHRT|BLOCK", Kind.FLAG, 1, ""),
         new Goal("Apply the silence trim to your entire armor", "SILNCE|TRIM|ARMOR", Kind.FLAG, 1, ""),
-        new Goal("Kill 28 different hostile mob types", "KILL|28 MOB|TYPES", Kind.SET, 28, "types"),
-        new Goal("Sprint 40,000 blocks", "SPRINT|40000|BLOCKS", Kind.COUNT, 40_000, "blocks"),
-        new Goal("15 effects active at once", "15|EFFCTS|ACTIVE", Kind.FLAG, 1, ""),
+        new Goal("Kill 36 different hostile mob types", "KILL|36 MOB|TYPES", Kind.SET, 36, "types"),
+        new Goal("Sprint 250,000 blocks", "SPRINT|250000|BLOCKS", Kind.COUNT, 250_000, "blocks"),
+        new Goal("20 effects active at once", "20|EFFCTS|ACTIVE", Kind.FLAG, 1, ""),
         new Goal("Have Haste II and conduit power at the same time", "HASTE2|CONDUT|POWER", Kind.FLAG, 1, ""),
-        new Goal("Take 20,000 damage", "TAKE|20000|DAMAGE", Kind.COUNT, 20_000, "damage"),
+        new Goal("Take 200,000 damage", "TAKE|200000|DAMAGE", Kind.COUNT, 200_000, "damage"),
         new Goal("Rename a ghast, iron golem, elder guardian and wither Dinnerbone", "DINNER|BONE|4 MOBS", Kind.SET, 4, "mobs"));
 
     // rows, columns, then the two diagonals
@@ -307,7 +306,7 @@ public final class Unlockout {
             + " pts&7, then " + GOAL_STEP + " less each; a full row, column or diagonal is &e" + LINE_POINTS + " pts &7and down by " + LINE_STEP + ".");
         broadcast("  &7The whole board is worth &e+" + BOARD_POINTS + " &7and ends it"
             + (seconds > 0 ? ", otherwise it ends in &f" + Fmt.timeAgo(seconds) + "&7." : "."));
-        broadcast("  &7When it ends every teammate is paid &e$1 &7per point their team scored.");
+        broadcast("  &7When it ends each team is paid &e$1 &7per point, split between its members online at the time.");
         broadcast("  &7Your map shows the board. &f/unlockout &7lists the goals, &f/unlockout map &7gets a new map.");
         broadcast("");
         for (ServerPlayer p : players()) join(p);
@@ -329,9 +328,11 @@ public final class Unlockout {
         broadcast("");
         broadcast(Fmt.PREFIX + " " + reason);
         for (Map.Entry<String, Integer> e : standings()) {
-            broadcast("  " + Teams.color(e.getKey()) + "&l" + e.getKey() + "  &e" + e.getValue() + " pts  &8(" + doneCount(e.getKey()) + "/" + GOALS.size() + " goals)"
-                + (e.getValue() > 0 ? "  &8|  &7+$" + Fmt.money(e.getValue()) + " each" : ""));
-            payOut(e.getKey(), e.getValue());
+            int pts = e.getValue();
+            int paid = payOut(e.getKey(), pts);
+            broadcast("  " + Teams.color(e.getKey()) + "&l" + e.getKey() + "  &e" + pts + " pts  &8(" + doneCount(e.getKey()) + "/" + GOALS.size() + " goals)"
+                + (paid > 0 ? "  &8|  &7+$" + Fmt.money(pts) + " &8($" + Fmt.money((double) pts / paid) + " each, " + paid + " online)"
+                    : pts > 0 ? "  &8|  &7nobody online, unpaid" : ""));
         }
         broadcast("");
     }
@@ -349,18 +350,20 @@ public final class Unlockout {
         return score.merge(team, pts, Integer::sum);
     }
 
-    // paid once when the event ends: every member of a team gets its final score in cash
-    private void payOut(String team, int pts) {
-        if (pts <= 0) return;
-        for (Map.Entry<UUID, Data.PlayerData> e : plugin.data.players.entrySet()) {
-            Data.PlayerData pd = e.getValue();
-            if (!team.equals(pd.team)) continue;
-            pd.money += pts;
-            plugin.data.log("UNLOCKOUT", "UNLOCKOUT", pd.name, pts, "Unlockout final score");
-            if (plugin.server.getPlayerList().getPlayer(e.getKey()) != null) {
-                plugin.notify(e.getKey(), "&a&l+ $" + Fmt.money(pts) + "  &7Unlockout final score  &8|  &a$ &e" + Fmt.money(pd.money), 10);
-            }
+    // paid once when the event ends: the team's final score in cash, split evenly between
+    // whoever on it is online right then. returns how many players that was
+    private int payOut(String team, int pts) {
+        if (pts <= 0) return 0;
+        List<ServerPlayer> online = new ArrayList<>();
+        for (ServerPlayer p : players()) if (team.equals(team(p))) online.add(p);
+        double share = (double) pts / online.size();
+        for (ServerPlayer p : online) {
+            Data.PlayerData pd = plugin.data.get(p.getUUID());
+            pd.money += share;
+            plugin.data.log("UNLOCKOUT", "UNLOCKOUT", pd.name, share, "Unlockout final score");
+            plugin.notify(p.getUUID(), "&a&l+ $" + Fmt.money(share) + "  &7Unlockout final score  &8|  &a$ &e" + Fmt.money(pd.money), 10);
         }
+        return online.size();
     }
 
     void join(ServerPlayer p) {
@@ -395,10 +398,10 @@ public final class Unlockout {
             // vehicles, and hostile mobs can't be leashed at all
             Set<String> held = new HashSet<>();
             for (Leashable l : Leashable.leashableLeashedTo(p)) if (l instanceof Mob m) held.add(key(m.getType()));
-            if (held.size() >= 20) flag(team, LEASH);
+            if (held.size() >= 30) flag(team, LEASH);
             if (silenceSet(p)) flag(team, TRIM);
             if (brushedSet(p)) flag(team, BRUSHED);
-            if (p.getActiveEffects().size() >= 15) flag(team, EFFECTS);
+            if (p.getActiveEffects().size() >= 20) flag(team, EFFECTS);
             MobEffectInstance haste = p.getEffect(MobEffects.HASTE);
             if (haste != null && haste.getAmplifier() >= 1 && p.hasEffect(MobEffects.CONDUIT_POWER)) flag(team, CONDUIT);
             concrete.merge(team, p.getInventory().countItem(Items.RED_CONCRETE), Integer::sum);
@@ -599,7 +602,7 @@ public final class Unlockout {
         if (victim instanceof ServerPlayer v && team(v) != null) {
             String vt = team(v);
             // /kill is generic_kill, so only actually falling out of the world counts
-            if (source.is(DamageTypes.FELL_OUT_OF_WORLD)) flag(vt, VOID);
+            if (source.is(DamageTypes.FELL_OUT_OF_WORLD)) item(vt, VOID, v.level().dimension().identifier().getPath());
             Long won = heroAt.get(v.getUUID());
             if (source.getEntity() instanceof Warden && won != null && System.currentTimeMillis() - won <= 30_000) flag(vt, HERO);
             if (!running) return;
@@ -611,16 +614,13 @@ public final class Unlockout {
         if (team == null) return;
         if (victim instanceof ServerPlayer v) {
             String vt = team(v);
-            if (vt != null && !vt.equals(team)) item(team, PVP, vt);
+            if (vt != null && !vt.equals(team)) add(team, PVP, 1);
             return;
         }
         String type = key(victim.getType());
         if (victim instanceof Enemy) item(team, HOSTILE, type);
-        if (victim instanceof Warden || victim instanceof WitherBoss || victim.getType() == EntityType.ELDER_GUARDIAN) item(team, BOSSES, type);
-        if (victim.getType() == EntityType.EVOKER || victim.getType() == EntityType.RAVAGER
-            || victim.getType() == EntityType.PIGLIN_BRUTE || victim.getType() == EntityType.ELDER_GUARDIAN) {
-            item(team, ELITE, type);
-        }
+        if (victim instanceof Warden) add(team, BOSSES, 1);
+        if (victim.getType() == EntityType.PIGLIN_BRUTE) add(team, ELITE, 1);
     }
 
     // raw amount of a hit that landed, see LivingEntityMixin
@@ -632,13 +632,14 @@ public final class Unlockout {
         }
         if (source.getEntity() instanceof ServerPlayer a && a != entity) {
             String at = hooks.team(a);
-            if (at != null) hooks.add(at, DEALT, amount);
+            // capped at the victim's max health so a parrot fed a cookie can't one-shot the goal
+            if (at != null) hooks.add(at, DEALT, Math.min(amount, entity.getMaxHealth()));
         }
     }
 
     public static void bred(ServerPlayer p, Animal parent) {
         String team = teamOf(p);
-        if (team != null) hooks.item(team, BREED, key(parent.getType()));
+        if (team != null) hooks.add(team, BREED, 1);
     }
 
     public static void ate(ServerPlayer p, ItemStack stack) {
@@ -648,7 +649,7 @@ public final class Unlockout {
 
     public static void composted(ServerPlayer p, ItemStack stack) {
         String team = teamOf(p);
-        if (team != null && stack.has(DataComponents.FOOD)) hooks.item(team, COMPOST, key(stack.getItem()));
+        if (team != null && stack.has(DataComponents.FOOD)) hooks.add(team, COMPOST, 1);
     }
 
     // fires every tick the spyglass is up; same ray the vanilla looking_at predicate uses

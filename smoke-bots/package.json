@@ -1,0 +1,7 @@
+{
+  "name": "smoke-bots",
+  "private": true,
+  "dependencies": {
+    "mineflayer": "^4.39.0"
+  }
+}

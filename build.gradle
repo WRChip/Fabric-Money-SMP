@@ -2,9 +2,13 @@ plugins {
     id 'fabric-loom' version '1.17.20'
 }
 
-version = '1.4.8'
+version = '1.6.0'
 group = 'dev.flame'
 base.archivesName = 'MoneySMP-fabric'
+
+loom {
+    accessWidenerPath = file('src/main/resources/moneysmp.accesswidener')
+}
 
 repositories {
     mavenCentral()
@@ -52,3 +56,14 @@ tasks.register('performanceCheck', JavaExec) {
 }
 
 check.dependsOn performanceCheck
+
+// the fragments' custom model; the zip lands next to the jar
+tasks.register('resourcePack', Zip) {
+    from 'resourcepack'
+    exclude '*.py'
+    archiveFileName = "MoneySMP-pack-${version}.zip"
+    destinationDirectory = layout.buildDirectory.dir('libs')
+    preserveFileTimestamps = false
+    reproducibleFileOrder = true
+}
+assemble.dependsOn resourcePack

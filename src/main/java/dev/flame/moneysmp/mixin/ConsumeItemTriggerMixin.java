@@ -1,5 +1,6 @@
 package dev.flame.moneysmp.mixin;
 
+import dev.flame.moneysmp.Legends;
 import dev.flame.moneysmp.Unlockout;
 import net.minecraft.advancements.criterion.ConsumeItemTrigger;
 import net.minecraft.server.level.ServerPlayer;
@@ -14,5 +15,6 @@ public abstract class ConsumeItemTriggerMixin {
     @Inject(method = "trigger", at = @At("HEAD"))
     private void moneysmp$unlockout(ServerPlayer player, ItemStack stack, CallbackInfo ci) {
         Unlockout.ate(player, stack);
+        Legends.drank(player, stack);
     }
 }

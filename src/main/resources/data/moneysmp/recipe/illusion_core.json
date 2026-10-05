@@ -1,0 +1,23 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "misc",
+  "pattern": [
+    "WEW",
+    "EHE",
+    "WEW"
+  ],
+  "key": {
+    "W": "minecraft:emerald_block",
+    "E": "minecraft:ender_eye",
+    "H": "minecraft:heavy_core"
+  },
+  "result": {
+    "id": "minecraft:clay_ball",
+    "components": {
+      "minecraft:item_name": {"text": "Illusion Core", "color": "dark_purple"},
+      "minecraft:item_model": "minecraft:heavy_core",
+      "minecraft:custom_data": {"moneysmp_legend": "illusion_core"},
+      "minecraft:lore": [{"text": "Part of the Wand of Illusion.", "color": "dark_gray", "italic": false}]
+    }
+  }
+}

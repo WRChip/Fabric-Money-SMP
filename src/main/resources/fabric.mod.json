@@ -11,6 +11,7 @@
     "main": ["dev.flame.moneysmp.MoneySMP"]
   },
   "mixins": ["moneysmp.mixins.json"],
+  "accessWidener": "moneysmp.accesswidener",
   "depends": {
     "fabricloader": ">=0.19.3",
     "fabric-api": "*",
