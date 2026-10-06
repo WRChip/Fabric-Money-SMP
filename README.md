@@ -52,6 +52,7 @@ Admin (`moneysmp.admin`):
 - `/moneysmp timer <player>` (a carrier's logout grace, today's play and day reset), `timer skip <player>` (grace over, today's hour done)
 - `/moneysmp event altar start|stop`, `event altar give <player> <fragment>` (a fresh copy into their hands), `event altar respawn <fragment>` (a fresh copy back at its ring)
 - `/moneysmp legendary give <player> <item>`, `legendary altar <type>` (an altar where you stand), `legendary altar remove` (the nearest within 8 blocks), `legendary altar list`
+- `/moneysmp legendary find [item]` (the emerald chestplate unless named): who is holding it, offline players included, from the saved player data. Loose items and containers in the world aren't searched
 - `/moneysmp legendary species <player|all> <human|vampire|pale|plaguedoctor>`, `legendary contagion stop|reset`
 
 ## Control points

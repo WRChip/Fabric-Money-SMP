@@ -189,6 +189,8 @@ final class Commands {
             .then(literal("species").executes(c.exec("legendary species"))
                 .then(argument("player", word()).suggests(playersOrAll).executes(c.exec("legendary species", "player"))
                     .then(argument("species", word()).suggests(species).executes(c.exec("legendary species", "player", "species")))))
+            .then(literal("find").executes(c.exec("legendary find"))
+                .then(argument("item", word()).suggests(legendItems).executes(c.exec("legendary find", "item"))))
             .then(literal("contagion").executes(c.exec("legendary contagion"))
                 .then(literal("stop").executes(c.exec("legendary contagion stop")))
                 .then(literal("reset").executes(c.exec("legendary contagion reset")))));
@@ -1431,6 +1433,21 @@ final class Commands {
                 String why = l.setSpeciesCmd(args[2], args[3]);
                 send(s, Fmt.PREFIX + " " + (why != null ? why : "&f" + args[2] + " &ais now &f" + args[3].toLowerCase() + "&a."));
             }
+            case "find" -> {
+                String id = args.length > 2 ? args[2].toLowerCase() : "emerald_chestplate";
+                if (!Legends.DEFS.containsKey(id)) {
+                    send(s, Fmt.PREFIX + " &cNo legendary called &f" + id + "&c.");
+                    return;
+                }
+                List<Scan.Hit> hits = Scan.find(plugin.server, id);
+                if (hits.isEmpty()) send(s, Fmt.PREFIX + " &7Nobody has the &f" + Legends.DEFS.get(id).name() + "&7, online or off.");
+                for (Scan.Hit h : hits) {
+                    Data.PlayerData pd = data().players.get(h.uid());
+                    String name = pd != null && pd.name != null ? pd.name : h.uid().toString();
+                    send(s, Fmt.PREFIX + " &f" + name + " &8» &7" + h.where() + (h.online() ? " &a(online)" : " &8(offline)")
+                        + (h.at().isEmpty() ? "" : " &7at &f" + h.at()));
+                }
+            }
             case "contagion" -> {
                 String what = args.length > 2 ? args[2].toLowerCase() : "";
                 if (what.equals("stop")) {
@@ -1443,7 +1460,7 @@ final class Commands {
                     send(s, Fmt.PREFIX + " &cUsage: &f/moneysmp legendary contagion <stop|reset>");
                 }
             }
-            default -> send(s, Fmt.PREFIX + " &cUsage: &f/moneysmp legendary <give|altar|species|contagion>");
+            default -> send(s, Fmt.PREFIX + " &cUsage: &f/moneysmp legendary <give|altar|species|find|contagion>");
         }
     }
 
